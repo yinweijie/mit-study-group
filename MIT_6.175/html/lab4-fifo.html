@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="MIT 6.175 Fall 2017">
+    <meta name="author" content="Quan Nguyen">
+    <!-- <link rel="icon" href="favicon.ico"> -->
+
+    <title>MIT 6.175 - Constructive Computer Architecture | Lab 4: N-Element FIFOs</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/6175.css" rel="stylesheet">
+
+  </head>
+
+  <body>
+
+        <!-- Static navbar -->
+    <nav class="navbar navbar-default navbar-static-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="../index.html">6.175</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+          <ul class="nav navbar-nav">
+            <li><a href="../index.html#schedule">Schedule</a></li>
+            <li class="active"><a href="../labs.html">Labs</a></li>
+            <li><a href="../course-info.html">Course Information</a></li>
+            <li><a href="../resources.html">Resources</a></li>
+            <li><a href="../contact.html">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+
+    <h1 id="page-header">Lab 4: N-Element FIFOs</h1>
+
+    <div class="container content">
+      <div class="bg-warning">
+        <p><strong>Lab 4 due date:</strong> Monday, October 9, 2017, at 11:59:59 PM EDT.</p>
+        <p>Your deliverables for Lab 4 are:</p>
+        <ul>
+          <li>your answers Exercises 1-4 in <tt>MyFifo.bsv</tt></li>
+          <li>your answers to Discussion Questions 1-4 in <tt>discussion.txt</tt></li>
+        </ul>
+      </div>
+
+    <h2>Introduction</h2>
+    <p>This lab focuses on the design of various N-element FIFOs including a conflict-free FIFO.
+      Conflict-free FIFOs are an essential tool for pipelined designs because they allow for pipeline stages to be connected without introducing additional scheduling constraints.</p>
+
+    <p>Creating a FIFO that is conflict-free is difficult because you have to create enqueue and dequeue methods that don't conflict with each other.
+      FIFOs that are not conflict free, such as pipeline and bypass FIFOs, make an assumption about the ordering of enqueue and dequeue.
+      Pipeline FIFOs assume dequeue is done before enqueue, and bypass FIFOs assume enqueue is done before dequeue.
+      EHRs alone are used to implement pipeline and bypass FIFOS, and EHRs along with a canonicalize rule are used to create conflict-free FIFOs.</p>
+
+    <h2>Parameterizable sized FIFO functionality</h2>
+    <p>In lecture you have seen an implementation for a two element conflict-free FIFO.
+      This module leveraged EHRs and a canonicalize rule to achieve conflict-free enqueue and dequeue methods.
+      Dequeue only read from the first register, and enqueue only wrote into the second register.
+      The canonicalize rule would move the contents of the second register to the first register if necessary.
+      This structure works well for a small FIFO such as a two element FIFO, but it is too complicated to use for larger FIFOs.</p>
+
+    <p>To implement larger FIFOs, you can use a <a href="http://en.wikipedia.org/wiki/Circular_buffer">circular buffer</a>.</p>
+
+    <p>Figure 1shows a FIFO implemented in a circular buffer.
+      This FIFO contains the data <tt>[1, 2, 3]</tt> with 1 at the front and 3 at the back.
+      The pointer <tt>deqP</tt> points to the front of the FIFO, and <tt>enqP</tt> points to the first free location past the FIFO.</p>
+
+    <table class="lab4-queue">
+        <tr><td>index</td><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr>
+        <tr><td>data</td><td class="qu"><tt>-</tt></td><td class="qu"><tt>-</tt></td><td class="qu"><tt>1</tt></td><td class="qu"><tt>2</tt></td><td class="qu"><tt>3</tt></td><td class="qu"><tt>-</tt></td></tr>
+        <tr><td></td><td></td><td></td><td>&#8593;</td><td></td><td></td><td>&#8593;</td></tr>
+        <tr><td>pointers</td><td></td><td></td><td><tt>deqP</tt></td><td></td><td></td><td><tt>enqP</tt></td></tr>
+        <tr class="caption"><td colspan="7">Figure 1: Example 6-element FIFO implemented in a circular buffer. This FIFO contains <tt>[1, 2, 3]</tt>.</td></tr>
+    </table>
+
+    <p>Enqueues into a FIFO implemented in a circular buffer are simply a write to the location <tt>enqP</tt> and incrementing <tt>enqP</tt> by one.
+      The result of enqueuing the value 4 into the example FIFO can be seen in Figure 2.</p>
+  
+    <table class="lab4-queue">
+      <tr><td>index</td><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr>
+      <tr><td>data</td><td class="qu"><tt>-</tt></td><td class="qu"><tt>-</tt></td><td class="qu"><tt>1</tt></td><td class="qu"><tt>2</tt></td><td class="qu"><tt>3</tt></td><td class="qu"><tt>4</tt></td></tr>
+      <tr><td></td><td>&#8593;</td><td></td><td>&#8593;</td><td></td><td></td><td></td></tr>
+      <tr><td>pointers</td><td><tt>enqP</tt></td><td></td><td><tt>deqP</tt></td><td></td><td></td><td></td></tr>
+      <tr class="caption"><td colspan="7">Figure 2: 6-element FIFO after enqueuing 4. This FIFO contains <tt>[1, 2, 3, 4]</tt>.</td></tr>
+    </table>
+
+    <p>Dequeues are even simpler.
+      To dequeue, all you need to do is increment <tt>deqP</tt> by one.
+      The result of dequeuing a value from the example FIFO can be seen in Figure 3.
+      Notice the data is not removed.
+      The value 1 is still stored in registers for the FIFO, but it is in invalid space so it will never be seen by the user again.
+      All of the <tt>-</tt>'s in the FIFO figures refer to old data that used to be in the FIFO, but they are no longer valid.
+      There are no valid bits in this FIFO structure.
+      Locations are valid if they are at or after the dequeue pointer but before the enqueue pointer.
+      This adds some complexity to figuring out if a FIFO is full or empty.</p>
+
+    <table class="lab4-queue">
+      <tr><td>index</td><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr>
+      <tr><td>data</td><td class="qu"><tt>-</tt></td><td class="qu"><tt>-</tt></td><td class="qu"><tt>1</tt></td><td class="qu"><tt>2</tt></td><td class="qu"><tt>3</tt></td><td class="qu"><tt>4</tt></td></tr>
+      <tr><td></td><td>&#8593;</td><td></td><td></td><td>&#8593;</td><td></td><td></td></tr>
+      <tr><td>pointers</td><td><tt>enqP</tt></td><td></td><td></td><td><tt>deqP</tt></td><td></td><td></td></tr>
+      <tr class="caption"><td colspan="7">Figure 3: 6-element FIFO after dequeuing an element. This FIFO contains <tt>[2, 3, 4]</tt>.</td></tr>
+    </table>
+
+    <p>Consider the FIFO state in Figure 4.
+      This figure shows a FIFO with <tt>enqP</tt> and <tt>deqP</tt> pointers pointing to the same element.
+      Is this FIFO full or empty?
+      You can not tell unless you have more information.
+      To keep track of the state of FIFOs when pointers overlap, we will have a register saying if the FIFO is full and another one saying if it is empty.
+      A full FIFO with the additional registers keeping track of full and empty can be seen in Figure 5.</p>
+
+    <table class="lab4-queue">
+      <tr><td>index</td><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr>
+      <tr><td>data</td><td class="qu"><tt>3</tt></td><td class="qu"><tt>9</tt></td><td class="qu"><tt>6</tt></td><td class="qu"><tt>2</tt></td><td class="qu"><tt>0</tt></td><td class="qu"><tt>3</tt></td></tr>
+      <tr><td></td><td></td><td></td><td>&#8593; &#8593;</td><td></td><td></td><td></td></tr>
+      <tr><td>pointers</td><td></td><td></td><td><tt>enqP</tt> <tt>deqP</tt></td><td></td><td></td></tr>
+      <tr class="caption"><td colspan="7">Figure 4: Full or empty 6-element FIFO.</td></tr>
+    </table>
+
+    <table class="lab4-queue">
+      <tr><td>index</td><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr>
+      <tr><td>data</td><td class="qu"><tt>3</tt></td><td class="qu"><tt>9</tt></td><td class="qu"><tt>6</tt></td><td class="qu"><tt>2</tt></td><td class="qu"><tt>0</tt></td><td class="qu"><tt>3</tt></td></tr>
+      <tr><td></td><td></td><td></td><td>&#8593; &#8593;</td><td></td><td></td><td></td></tr>
+      <tr><td>pointers</td><td></td><td></td><td><tt>enqP</tt> <tt>deqP</tt></td><td></td><td></td></tr>
+      <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td>size</td><td class="qu">full:</td><td class="qu"><tt>True</tt></td><td></td><td class="qu">empty:</td><td class="qu"><tt>False</tt></td><td></td></tr>
+      <tr class="caption"><td colspan="7">Figure 5: Full 6-element FIFO.</td></tr>
+    </table>
+
+    <p>A cleared FIFO will have <tt>enqP</tt> and <tt>deqP</tt> pointing to the same location with <tt>empty</tt> being <tt>True</tt> and <tt>full</tt> being <tt>False</tt>.</p>
+
+    <p>If <tt>enqP</tt> or <tt>deqP</tt> are pointing to the same location, one of <tt>empty</tt> or <tt>full</tt> should be true.
+      When one pointer is moved to the same position as the other pointer, the FIFO needs to set the <tt>empty</tt> or <tt>full</tt> signal depending on what method moved the pointer.
+      If an enqueue operation was performed, <tt>full</tt> should be true.
+      If a dequeue operation was performed, <tt>empty</tt> should be true.</p>
+
+    <h2>N-Element FIFO implementation details</h2>
+    <p>This section goes into the details required to implement an N-element FIFO as a circular buffer in Bluespec.</p>
+
+    <h3>Data structure</h3>
+    <p>The FIFO will have an <tt>n</tt> element vector of registers to store the data in the FIFO.
+      This FIFO should be designed to work with a parametric type <tt>t</tt>, so the registers will be of type <tt>Reg#(t)</tt>.</p>
+
+    <h3>Pointers</h3>
+    <p>The FIFO will have pointers for both enqueue and dequeue operations.
+      These pointers, <tt>enqP</tt> and <tt>deqP</tt>, point to the locations where the operations will happen next.
+      The enqueue pointer points to the next element just past all the valid data, and the dequeue pointer points to the front of the valid data.
+      These pointers will be registers with values of type <tt>Bit#(TLog#(n))</tt>.
+      <tt>TLog#(n)</tt> is the numeric type corresponding to the ceiling of the base-2 logarithm of the value of the numeric type <tt>n</tt>.
+      In short, <tt>TLog#(n)</tt> is the number of bits required to count from <tt>0</tt> to <tt>n-1</tt>.</p>
+
+    <h3>State flags</h3>
+    <p>There are also two state flags for the FIFO to go along with the enqueue and dequeue pointers: <tt>full</tt> and <tt>empty</tt>.
+      These registers are both false when <tt>enqP</tt> is not equal to <tt>deqP</tt>, but when <tt>enqP</tt> and <tt>deqP</tt> are equal, either <tt>full</tt> or <tt>empty</tt> is true expressing the state of the FIFO.</p>
+
+    <h3>Interface methods</h3>
+    <p>This FIFO will keep the same interface as the previous FIFOs introduced in class.</p>
+    <pre>interface Fifo#(numeric type n, type t);
+  method Bool notFull;
+  method Action enq(t x);
+  method Bool notEmpty;
+  method Action deq;
+  method t first;
+  method Action clear;
+endinterface</pre>
+    <p>The data type is <tt>t</tt> and the size is the numeric type <tt>n</tt>.</p>
+
+    <dl>
+      <dt>NotFull</dt>
+        <dd>The <tt>notFull</tt> method returns the negation of the internal full signal.</dd>
+      <dt>Enq</dt>
+        <dd>The <tt>enq</tt> method writes data to the location that the enqueue pointer points to, increments the enqueue pointer, and updates empty and full values if necessary.
+          This method should be blocked with a guard if an enqueue is not possible.</dd>
+    <dt>NotEmpty</dt>
+      <dd>The <tt>notEmpty</tt> method returns the negation of the internal empty signal.</dd>
+    <dt>Deq</dt>
+      <dd>The <tt>deq</tt> method increments the dequeue pointer, and it updates the empty and full values if necessary.
+        This method should be blocked with a guard if a dequeue is not possible.</dd>
+    <dt>First</dt>
+      <dd>The <tt>first</tt> method returns the element that the dequeue pointer points to, as long as the FIFO is not empty.
+        This method should be blocked with a guard if the FIFO is empty.</dd>
+    <dt>Clear</dt>
+      <dd>The <tt>clear</tt> method will set the enqueue and dequeue pointers to 0, and it will set the state of the FIFO to empty by setting the internal full and empty signals to their appropriate values.</dd>
+    </dl>
+
+
+    <h3>Method ordering</h3>
+    <p>Depending on the type of FIFO implemented, <tt>enq</tt> and <tt>deq</tt> may be able to fire in any order, a set order, or they may not be able to fire in the same cycle.
+      The methods that are commonly associated with <tt>enq</tt> and <tt>deq</tt> should be able to fire with their respective method.
+      That is, <tt>notFull</tt> should be able to fire with <tt>enq</tt>, and likewise <tt>notEmpty</tt> and <tt>first</tt> should be able to fire with <tt>deq</tt>.
+      In all cases, the <tt>clear</tt> method should have priority over all other methods, and therefore it will appear to happen last.</p>
+
+    <h3>Testing infrastructure</h3>
+    <p>There are two sets of testbenches for this lab: functional testbenches and scheduling testbenches.</p>
+
+    <p>The functional testbenches compare your FIFO implementation against a reference FIFO.
+      The testbenches randomly enqueue and dequeue data and make sure all the outputs of the two FIFOs give the same results.
+      These reference FIFOs are implemented as wrappers to a built-in BSV FIFO.</p>
+
+    <p>The scheduling testbenches works differently than all the other testbenches so far.
+      The scheduling testbenches aren't meant to be run, they are only supposed to be compiled.
+      These testbenches force schedules that your FIFOs should be able to meet.
+      If the testbenches compile without warnings, then your FIFOs are able to meet those schedules, and they pass the tests.
+      If your FIFOs are unable to meet the schedules, there will be compiler warnings or errors produced during compilation.
+      That message will either be that two rules in the testbench cannot fire together, or that the condition of some rule depends on the firing of that rule.</p>
+
+    <p>When looking at the compiler output, make sure to look at what module is causing the errors by finding the lines that say</p>
+      <pre>code generation for &lt;module_name&gt; starts</pre>
+      <p>Because of the way the Bluespec compiler is used, all the testbenches are partially compiled whenever you build one testbench so you may see warnings from modules you are not focusing on.</p>
+
+    <h2>Implementing N-Element FIFOs</h2>
+    <h3>Conflicting FIFOs</h3>
+    <p>To start, you will implement an N-Element FIFO with only registers.
+      This will cause <tt>enq</tt> and <tt>deq</tt> to conflict, but it will provide a starting point for all further FIFO designs.</p>
+
+    <div class="exercise"><p><strong>Exercise 1 (5 points):</strong>
+      Implement <tt>mkMyConflictFifo</tt> in <tt>MyFifo.bsv</tt>.
+      You can build and run the functional testbench by running
+      <pre>$ make conflict
+$ ./simConflictFunctional</pre>
+      There is no scheduling testbench for this module because <tt>enq</tt> and <tt>deq</tt> are expected to conflict.</p>
+    </div>
+
+    <p>Now that we have an initial conflicting FIFO, we will take a look at its conflicts and construct its conflict matrix.</p>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 1 (5 points):</strong>
+      What registers are read from and written to in each of the interface methods?
+      Remember that register reads performed in guards count.</p>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 2 (5 Points):</strong>
+      Fill out the conflict matrix for <tt>mkMyConflictFifo</tt>.
+      For simplicity, treat writes to the same register as conflicting (not just conflicting within a single rule).</p>
+    </div>
+
+    <h3>Pipeline and Bypass FIFOs</h3>
+    <p>The pipeline and bypass FIFOs are a step past the conflicting FIFO.
+      The pipeline and bypass FIFOs enable concurrent enqueues and dequeues by declaring a set ordering between them and their associated methods.</p>
+
+    <p>The pipeline FIFO has the following scheduling annotations.</p>
+    <pre>{notEmpty, first, deq} &lt; {notFull, enq} &lt; clear</pre>
+    <p>The bypass FIFO has the following scheduling annotations.</p>
+    <pre>{notFull, enq} &lt; {notEmpty, first, deq} &lt; clear</pre>
+
+    <h4>Creating ordering relations with EHRs</h4>
+    <p>There is a structural procedure to get these scheduling annotations from a conflicting design using EHRs.</p>
+    <ol>
+      <li>Replace conflicting registers with EHRs.</li>
+      <li>Assign ports of the EHRs to match the desired schedule. The first set of methods accesses port 0 of the EHR, the second set accesses port 1, etc.</li>
+    </ol>
+
+    <p>For example, to get the scheduling annotation</p>
+    <pre>{notEmpty, first, deq} &lt; {notFull, enq} &lt; clear</pre>
+
+    <p>first replace the registers that prevent the above scheduling annotation with EHRs.
+      In this case, that includes <tt>enqP</tt>, <tt>deqP</tt>, <tt>full</tt>, and <tt>empty</tt>.
+      Now, assign ports of the EHRs to match the desired schedule.
+      <tt>{notEmpty, first, deq}</tt> all get port 0, <tt>{notFull, enq}</tt> get port 1, and <tt>clear</tt> gets port 2.
+      You can optimize this design slightly by reducing the size of EHRs that have unused ports, but this is not necessary for the purposes of this lab.</p>
+
+    <div class="exercise"><p><strong>Exercise 2 (10 Points):</strong>
+      Implement <tt>mkMyPipelineFifo</tt> and <tt>mkMyBypassFifo</tt> in <tt>MyFifo.bsv</tt> using EHRs and the method mentioned above.
+      You can build the functional and scheduling testbenches for the pipeline FIFO and the bypass FIFO by running<p>
+      <pre>$ make pipeline</pre>
+      <p>and</p>
+      <pre>$ make bypass</pre>
+      <p> respectively.
+      If these compile with <strong>no scheduling warning</strong>, then the scheduling testbench passed and the two FIFOs have the expected scheduling behavior.
+      To test their functionality against reference implementations you can run<p>
+      <pre>$ ./simPipelineFunctional</pre>
+      <p>and</p>
+      <pre>$ ./simBypassFunctional</pre>
+      If you are having trouble implementing <tt>clear</tt> with the correct schedule and functionality, you can remove it from the tests temporarily by setting <tt>has_clear</tt> to false in the associated modules in <tt>TestBench.bsv</tt>.</p>
+    </div>
+
+    <h3>Conflict-free FIFOs</h3>
+    <p>The conflict-free is the most flexible FIFO.
+      It can be placed in a processor pipeline without adding additional scheduling constraints between stages.
+      The desired scheduling annotation for a conflict-free FIFO is shown below.</p>
+    <pre>{notFull, enq} CF {notEmpty, first, deq}
+{notFull, enq, notEmpty, first, deq} &lt; clear</pre>
+
+    <p>The <tt>clear</tt> method was chosen not to be conflict-free with <tt>enq</tt> and <tt>deq</tt> because it is given priority over the other methods.
+      If <tt>clear</tt> and <tt>enq</tt> happen in the same cycle, the <tt>clear</tt> method will have priority and the FIFO will be empty in the next cycle.
+      To match the behavior using method ordering, <tt>clear</tt> comes after <tt>enq</tt> and <tt>deq</tt>.</p>
+
+    <h4>Creating conflict-free schedules with EHRs</h4>
+    <p>Just like the procedure for pipeline and bypass fifos, there is a procedure to get the desired conflict-free scheduling annotation using EHRs.</p>
+    <ol>
+      <li>For each conflicting <tt>Action</tt> and <tt>ActionValue</tt> method that needs to be conflict-free with another method, add an EHR to represent a request to call that method.
+          If the method takes no arguments, the data type in the EHR should be <tt>Bool</tt> (True for a request, False for no request).
+          If the method takes one argument of type <tt>t</tt>, the data type in the EHR should be <tt>Maybe#(t)</tt> (<tt>tagged Valid x</tt> for a request with argument <tt>x</tt>, <tt>tagged Invalid</tt> for no request).
+          If the method takes arguments of type <tt>t1</tt>, <tt>t2</tt>, etc., the data type in the EHR should be <tt>Maybe#(TupleN#(t1,t2,...))</tt>.</li>
+      <li>Replace the actions in each conflicting <tt>Action</tt> and <tt>ActionValue</tt> method with a write to the newly added EHR corresponding to the method.</li>
+      <li>Create a canonicalize rule to take requests from the EHRs and perform the actions that used to be in each of the methods.
+          This canonicalize rule should fire at the end of each cycle after all of the other methods.</li>
+    </ol>
+
+    <h4>Using compiler attributes to enforce rule firing</h4>
+    <p>BSV does not have a way to force the canonicalize rule to fire every cycle, but it does have a way to statically check that it will fire every cycle at compile time.
+      By using <em>compiler attributes</em>, you can add additional information about a module, method, rule, or function to the Bluespec compiler.
+      You've already seen the <tt>(*&nbsp;synthesize&nbsp;*)</tt> attribute, now you will learn about two more for rules.</p>
+
+    <p>As you know, the guard for a rule or a method is the combination of the explicit guard and the implicit guard.
+      The attribute <tt>(*&nbsp;no_implicit_conditions&nbsp;*)</tt> is placed right before a rule to tell the compiler that you don't expect there to be any implicit guards (the compiler calls guards conditions) from the body of the rule.
+      If you are wrong and there are implicit guards in the rule, the compiler will throw an error at compile time.
+      This guard acts as an assertion that <tt>CAN_FIRE</tt> is equal to the explicit guard.</p>
+
+    <p>Another thing that can prevent a rule from firing is conflicts with other rules and methods.
+      The attribute <tt>(*&nbsp;fire_when_enabled&nbsp;*)</tt> is placed right before a rule to tell the compiler that whenever the guards for the rule are met, the rule should fire.
+      If there is a way the guards can be met without the rule firing, then the compiler will throw an error at compile time.
+      This guard acts as an assertion that <tt>WILL_FIRE</tt> is equal to <tt>CAN_FIRE</tt>.</p>
+
+    <p>Using these two attributes together will assert that the rule will fire whenever your explicit guard is true.
+      If your explicit guard is true (or empty), then it is asserting that the rule will fire every cycle.
+      Below is an example of the two attributes used together:</p>
+    <pre>(* no_implicit_conditions *)
+(* fire_when_enabled *)
+rule firesEveryCycle;
+    // body of rule
+endrule
+
+(* no_implicit_conditions, fire_when_enabled *)
+rule alsoFiresEveryCycle;
+    // body of rule
+endrule</pre>
+
+    <p>If the rule <tt>fireEveryCycle</tt> cannot actually fire every cycle, the Bluespec compiler will throw an error.
+      You should have these attributes above your canonicalize rule to make sure it is firing every cycle.</p>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 3 (5 Points):</strong>
+      Using your conflict matrix for <tt>mkMyConflictFifo</tt>, which conflicts do not match the conflict-free FIFO scheduling constraints shown above?</p>
+    </div>
+
+    <div class="exercise"><p><strong>Exercise 3 (30 Points):</strong>
+      Implement <tt>mkMyCFFifo</tt> as described above <em>without</em> the clear method.
+      You can build the functional and scheduling testbenches by running</p>
+      <pre>$ make cfnc</pre>
+      <p>If these compile with no scheduling warning, then the scheduling testbench passed and the <tt>enq</tt> and <tt>deq</tt> methods of the FIFO can be scheduled in any order.
+      (It is fine to have a warning saying that rule <tt>m_maybe_clear</tt> has no action and will be removed.)
+      You can run the functional testbench by running</p>
+      <pre>$ ./simCFNCFunctional</pre>
+    </div>
+
+    <!-- % Explain the clear interface? -->
+    <h3>Adding the clear method to the conflict-free FIFO</h3>
+      <p>The clear method adds some complexity to the design.
+      It needs scheduling constraints that prevent it from being scheduled before <tt>enq</tt> and <tt>deq</tt>, but it can't conflict with the canonicalize rule.</p>
+
+      <p>One of the easiest ways to create a scheduling constraint between to methods is have one method write to an EHR, and the other method read from a later port of the EHR.
+      In this case, you should be able to use existing EHRs to force this scheduling constraint.</p>
+
+    <div class="exercise"><p><strong>Exercise 4 (10 Points):</strong>
+      Add the <tt>clear()</tt> method to <tt>mkMyCFFifo</tt>.
+      It should come after all other interface methods, and it should come before the canonicalize rule.
+      You can build the functional and scheduling testbenches by running</p>
+      <pre>$ make cf</pre>
+
+      <p>If these compile with no scheduling warning, then the scheduling testbench passed and the FIFO has the expected scheduling behavior.
+      You can run the functional testbench by running</p>
+      <pre>$ ./simCFFunctional</pre>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 4 (5 Points):</strong>
+      In your design of the <tt>clear()</tt> method, how did you force the scheduling constraint <tt>{enq, deq} &lt; clear</tt>?</p>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 5 (Optional):</strong> How long did you take to work on this lab?</p></div>
+
+        <div class="container">
+      <hr>
+      <footer class="footer">
+        <div class="container">
+          <p class="footer">&copy; 2016 <a href="http://web.mit.edu">Massachusetts Institute of Technology</a>. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="../js/jquery-3.1.0.min.js"></script>
+    <script src="../js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+/* many thanks to http://stackoverflow.com/questions/7717527/smooth-scrolling-when-clicking-an-anchor-link */
+$(document).on('click', 'a', function(event){
+    var href = $.attr(this, 'href');
+    var hash = href.indexOf("#");
+    var doc = location.pathname.substring(location.pathname.lastIndexOf("/") + 1);
+    console.log(doc);
+    if (hash !== -1 && href.substring(0, hash) === doc) {
+      event.preventDefault();
+      $('html, body').animate({
+          scrollTop: $( href.substring(hash) ).offset().top
+      }, 500);
+    }
+});
+    </script>
+
+
+  </body>
+</html>

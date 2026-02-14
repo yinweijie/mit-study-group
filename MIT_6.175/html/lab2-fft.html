@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="MIT 6.175 Fall 2017">
+    <meta name="author" content="Quan Nguyen">
+    <!-- <link rel="icon" href="favicon.ico"> -->
+
+    <title>MIT 6.175 - Constructive Computer Architecture | Lab 2: Simple Fifo, FFT Pipeline and elasticity</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/6175.css" rel="stylesheet">
+
+  </head>
+
+  <body>
+
+        <!-- Static navbar -->
+    <nav class="navbar navbar-default navbar-static-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="../index.html">6.175</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+          <ul class="nav navbar-nav">
+            <li><a href="../index.html#schedule">Schedule</a></li>
+            <li class="active"><a href="../labs.html">Labs</a></li>
+            <li><a href="../course-info.html">Course Information</a></li>
+            <li><a href="../resources.html">Resources</a></li>
+            <li><a href="../contact.html">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+
+    <h1 id="page-header">Lab 2: Simple Fifo, FFT Pipeline and elasticity</h1>
+
+    <div class="container content">
+      <div class="bg-warning">
+        <p><strong>Lab 2 due date:</strong>  Monday, September 25, 2017, at 11:59:59 PM EDT.</p>
+        <p>Your deliverables for Lab 2 are:</p>
+        <ul>
+          <li>your answers to Exercises 1-3 in <tt>Fifo.bsv</tt> and <tt>Fft.bsv</tt>, and</li>
+          <li>your answers to Discussion Questions 1 and 2 in <tt>discussion.txt</tt>.</li>
+        </ul>
+      </div>
+
+      <h2>Introduction</h2>
+<!-- Scratch head to find what to make them do -->      
+
+    <p>
+    In this lab the goal is to build up different versions of the Fast Fourier Transform (FFT) module.
+
+    This module is described in detail in "L0x", titled <em>FFT: An example of complex combinational circuits</em>, which was given in a previous version of this class.
+    You'll find the presentation as a <a href="../lectures/L0x-FFT.pptx">[pptx]</a> or a <a href="../lectures/L0x-FFT.pdf">[pdf]</a>.</p>
+    <p>
+    But before the FFT, we will do a warm up with Fifos.
+    Then you will implement an inelastic pipeline implementation of the FFT using registers between each stage.
+    Finally, you will implement an elastic pipeline implementation of the FFT using FIFOs between each stage.</p>
+
+        
+      <h2>Fifo</h2>
+      <p>The posted FFT presentation assumes that we have Fifos with guards.
+        Guards on <tt>enq</tt>, <tt>deq</tt>, and <tt>first</tt> prevent the rules enclosing calls of these methods from firing if the guards on the methods are not met.
+        Because of this assumption, the code in the presentation uses <tt>enq</tt>, <tt>deq</tt>, and <tt>first</tt> without checking if the FIFO is <tt>notFull</tt> or <tt>notEmpty</tt>.</p>
+
+      <p>The syntax for a guard on a method is shown below:</p>
+      <pre>method Action myMethodName(Bit#(8) in) if (myGuardExpression);
+    // method body
+endmethod</pre>
+
+      <p><tt>myGuardExpression</tt> is an expression that is <tt>True</tt> if and only if it is valid to call <tt>myMethodName</tt>.
+        If <tt>myMethodName</tt> is going to be used in a rule the next time it is fired, the rule will be blocked from executing until <tt>myGuardExpression</tt> is <tt>True</tt>.</p>
+
+      <div class="exercise"><p><strong>Exercise 1 (10 Points):</strong>
+        Completes the code in Fifo.bsv to implements a 3-elements fifo with properly guarded methods. Feel free to take inspiration from the class slides. 
+        The interface defined in Fifo.bsv tells you the type of the methods (enq, deq, first) that your module should define.        
+    </p>
+      </div>
+
+      <h2>Data types</h2>
+      <p>Multiple data types are provided to help with the FFT implementation.
+        The default settings for the provided types describe an FFT implementation that works with an input vector of 64 different 64-bit complex numbers.
+        The type for the 64-bit complex data is defined as <tt>ComplexData</tt>.
+        <tt>FftPoints</tt> defines the number of complex numbers, <tt>FftIdx</tt> defines the data type required for accessing a point in the vector, <tt>NumStages</tt> defines the number of stages, <tt>StageIdx</tt> defines a data type to access a particular stage, and <tt>BflysPerStage</tt> defines the number of butterfly units in each stage.
+        These type parameters are provided for your convenience, feel free to use any of these in your implementations.</p>
+
+      <p>It should be noted that the goal of this lab is not to understand the FFT algorithm, but rather to experiment with different control logics in a real-world application.
+        The <tt>getTwiddle</tt> and <tt>permute</tt> functions are provided with the testbench for your convenience.
+        However, their implementations are not strictly adhering to the FFT algorithm, and may even change later.
+        It would be beneficial to focus not on the algorithm, but on changing the control logic of a given datapath in order to enhance its characteristics.</p>
+
+
+      <h2>Butterfly unit</h2>
+      <p>The module <tt>mkBfly4</tt> implements a 4-way butterfly function which was discussed in the presentation.
+        This module should be instantiated exactly as many times as you use it in your code.</p>
+
+      <pre>interface Bfly4;
+    method Vector#(4,ComplexData) bfly4(Vector#(4,ComplexData) t, Vector#(4,ComplexData) x);
+endinterface
+
+module mkBfly4(Bfly4);
+    method Vector#(4,ComplexData) bfly4(Vector#(4,ComplexData) t, Vector#(4,ComplexData) x);
+        // Method body
+    endmethod
+endmodule</pre>
+
+      <h2>Different implementations of the FFT</h2>
+      <p>You will be implementing modules corresponding to the following FFT interface:</p>
+
+      <pre>interface Fft;
+    method Action enq(Vector#(FftPoints, ComplexData) in);
+    method ActionValue#(Vector#(FftPoints, ComplexData)) deq();
+endinterface</pre>
+
+      <p>The modules <tt>mkFftCombinational</tt>,  <tt>mkFftInelasticPipeline</tt>, and <tt>mkFftElasticPipeline</tt> should all implement a 64-point FFT which is functionally equivalent to the combinational model. 
+        The module <tt>mkFftCombinational</tt> is given to you.
+        Your job is to implement the other 2 modules, and demonstrate their correctness using the provided combinational implementation as a benchmark.</p>
+
+      <p>Each of the modules contain two FIFOs, <tt>inFifo</tt> and <tt>outFifo</tt>, which contain the input complex vector and the output complex vector respectively, as shown below.</p>
+
+      <pre>module mkFftCombinational(Fft);
+    FIFOF#(Vector#(FftPoints, ComplexData)) inFifo &lt;- mkFIFOF;
+    FIFOF#(Vector#(FftPoints, ComplexData)) outFifo &lt;- mkFIFOF;
+   ...</pre>
+
+      <p>These FIFOs are conflict-free FIFOs with guards added in exercise one.</p>
+
+      <p>Each module also contains a <tt>Vector</tt> or multiple <tt>Vector</tt>s of <tt>mkBfly4</tt>, as shown below.</p>
+
+      <pre>Vector#(3, Vector#(16, Bfly4)) bfly &lt;- replicateM(mkBfly4);</pre>
+
+      <p>The <tt>doFft</tt> rule should dequeue an input from <tt>inFifo</tt>, perform the FFT algorithm, and finally enqueue the result into <tt>outFifo</tt>.
+        This rule will usually require other functions and modules to function correctly.
+        The elastic pipeline implementation will require multiple rules.</p>
+
+      <pre>   ...
+    rule doFft;
+        // Rule body
+    endrule
+   ...</pre>
+
+      <p>The <tt>Fft</tt> interface provides methods to send data to the FFT module and receive data from it.
+        The interface only enqueues into <tt>inFifo</tt> and dequeues from <tt>outFifo</tt>.
+
+<pre>   ...
+    method Action enq(Vector#(FftPoints, ComplexData) in);
+        inFifo.enq(in);
+    endmethod
+
+    method ActionValue#(Vector#(FftPoints, ComplexData)) deq;
+        outFifo.deq;
+        return outFifo.first;
+    endmethod
+endmodule </pre>
+
+<!--
+      <div class="exercise"><p><strong>Exercise 2 (5 Points):</strong>
+        In <tt>mkFftFolded</tt>, create a folded FFT implementation that makes use of just 16 butterflies overall.
+        This implementation should finish the overall FFT algorithm (starting from dequeuing the input FIFO to enqueuing the output FIFO) in exactly 3 cycles.</p>
+        <p>The Makefile can be used to build <tt>simFold</tt> to test this implementation.
+        Compile and run using</p>
+<pre>$ make fold
+$ ./simFold</pre>
+      </div>
+
+-->
+      <div class="exercise"><p><strong>Exercise 2 (5 Points):</strong>
+        In <tt>mkFftInelasticPipeline</tt>, create an inelastic pipeline FFT implementation. You can look <a href="../lectures/inelastic.pdf">here</a>
+        for some extra slides on inelastic pipelining, compared to what we covered in class.
+        This implementation should make use of 48 butterflies and 2 large registers, each carrying 64 complex numbers. 
+        The latency of this pipelined unit must also be exactly 3 cycles, though its throughput would be 1 FFT operation every cycle.
+      <p>The Makefile can be used to build <tt>simInelastic</tt> to test this implementation.
+        Compile and run using</p>
+<pre>$ make inelastic
+$ ./simInelastic</pre>
+      </div>
+
+      <div class="exercise"><p><strong>Exercise 3 (10 Points):</strong>
+      <p>In <tt>mkFftElasticPipeline</tt>, create an elastic pipeline FFT implementation.
+        This implementation should make use of 48 butterflies and some fifos. You should also try to use:
+        <ol>
+                <li> your 3 elements FIFOs (instantiated with <tt>mkFifo</tt>).</li>
+                <li> the provided FIFOs (instantiated with <tt>mkCFFifo</tt>).</li>
+        </ol>
+        The stages between the FIFOs should be in their own rules that can fire independently.
+        When running the testbench you are likely to observe an important difference in performance (number of cycle it took to run the testbench).
+        That is expected, please email me if you don't. 
+        </p>
+
+      <p>The Makefile can be used to build <tt>simElastic</tt> to test this implementation.
+Compile and run using</p>
+      <pre>$ make elastic
+$ ./simElastic</pre>
+      </div>
+
+      <h2>Discussion Questions</h2>
+      <p>Write your answer to this question in the text file <tt>discussion.txt</tt> provided in the lab repository.</p>
+
+      <div class="exercise discussion"><p><strong>Discussion Question 1:</strong></p>
+      What is the source of the performance gap between your two elastic implementations (when it is using the class fifo and  when it is using your own fifo)?
+      <strong>(2 Points)</strong>
+
+      </div>
+      <div class="exercise discussion"><p><strong>Discussion Question 2:</strong></p>
+        Assume you are given a black box module that performs a 10-stage algorithm.
+        You can not look at its internal implementation, but you can test this module by giving it data and looking at the output of the module.
+        You have been told that it is implemented as one of the structures covered in this lab, but you do not know which one.
+            <!--<li>How can you tell whether the implementation of the module is a folded implementation or whether it is a pipeline implementation? <strong>(3 Points)</strong></li> -->
+            How can you tell if it is inelastic or if it is elastic? <strong>(2 Points)</strong>
+      </div>
+
+      <div class="exercise discussion"><p><strong>Discussion Question 3 (Optional):</strong> How long did you take to work on this lab?</p></div>
+
+      <p>When you have completed all the exercises and your code works, commit your changes to the repository, and push your changes back to the source.</p>
+
+    </div>
+
+        <div class="container">
+      <hr>
+      <footer class="footer">
+        <div class="container">
+          <p class="footer">&copy; 2016 <a href="http://web.mit.edu">Massachusetts Institute of Technology</a>. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="../js/jquery-3.1.0.min.js"></script>
+    <script src="../js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+/* many thanks to http://stackoverflow.com/questions/7717527/smooth-scrolling-when-clicking-an-anchor-link */
+$(document).on('click', 'a', function(event){
+    var href = $.attr(this, 'href');
+    var hash = href.indexOf("#");
+    var doc = location.pathname.substring(location.pathname.lastIndexOf("/") + 1);
+    console.log(doc);
+    if (hash !== -1 && href.substring(0, hash) === doc) {
+      event.preventDefault();
+      $('html, body').animate({
+          scrollTop: $( href.substring(hash) ).offset().top
+      }, 500);
+    }
+});
+    </script>
+
+
+  </body>
+</html>

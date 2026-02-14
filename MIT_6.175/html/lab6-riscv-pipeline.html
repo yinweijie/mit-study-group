@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="MIT 6.175 Fall 2016">
+    <meta name="author" content="Quan Nguyen">
+    <!-- <link rel="icon" href="favicon.ico"> -->
+
+    <title>MIT 6.175 - Constructive Computer Architecture | Lab 6: RISC-V Processor with Six-Stage Pipeline and Branch Prediction</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/6175.css" rel="stylesheet">
+
+  </head>
+
+  <body>
+
+        <!-- Static navbar -->
+    <nav class="navbar navbar-default navbar-static-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="../index.html">6.175</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+          <ul class="nav navbar-nav">
+            <li><a href="../index.html#schedule">Schedule</a></li>
+            <li class="active"><a href="../labs.html">Labs</a></li>
+            <li><a href="../course-info.html">Course Information</a></li>
+            <li><a href="../resources.html">Resources</a></li>
+            <li><a href="../contact.html">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+
+    <h1 id="page-header">Lab 6: RISC-V Processor with Six-Stage Pipeline and Branch Prediction</h1>
+
+    <div class="container content">
+      <div class="bg-warning">
+        <p><strong>Lab 6 due date:</strong> Due Friday, November 3, 2017, at 11:59:59 PM EDT.
+        </p>
+        <p>Your deliverables for Lab 6 are:</p>
+        <ul>
+          <li>your answers to Exercises 1 through 4 in <tt>SixStage.bsv</tt>, <tt>Bht.bsv</tt>, and <tt>SixStageBHT.bsv</tt></li>
+          <li>your answers to Discussion Questions 1 through 9 in <tt>discussion.txt</tt></li>
+        </ul>
+      </div>
+
+      <h2>Introduction</h2>
+      <p>This lab is your introduction to realistic RISC-V pipelines and branch prediction.
+        At the end of this lab, you will have a six-stage RISC-V pipeline with multiple address and branch predictors working together.
+
+      <p class="bg-warning"><strong>Note:</strong> In this lab, we use one-bit global epochs  (instead of unbounded distributed epochs) to kill wrong path instructions.
+        First with just one epoch, and then with the BHT we will add an other epoch, as explained in the tutorial 4.
+      </p>
+    <p> As last time, you need to do <pre> bash init.sh </pre> the first time you clone your lab. The infrastructure is basically the same than for the last lab. </p>
+
+      <h2>Additions to the lab infrastructure</h2>
+      <h3>New included files</h3>
+      <p>The following files appear in <tt>src/includes/</tt>:</p>
+      <table class="table lab5-listing">
+      <thead>
+        <tr><th>Filename</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><tt>FPGAMemory.bsv</tt></td><td>A wrapper for block RAM commonly found on FPGAs.
+        This has an identical interface as the DelayedMemory from the previous lab.</td></tr>
+        <tr><td><tt>SFifo.bsv</tt></td><td>Three searchable FIFO implementations: one based off of a pipeline FIFO, one based off of a bypass FIFO, and the other based off of a conflict-free FIFO.
+        All implementations assume search is done immediately before enq.</td></tr>
+        <tr><td><tt>Scoreboard.bsv</tt></td><td>Three scoreboard implementations based off of searchable FIFOs.
+        The pipeline scoreboard uses a pipeline searchable FIFO, the bypass scoreboard uses a bypass searchable FIFO, and the conflict-free scoreboard uses a conflict-free searchable FIFO.</td></tr>
+        <tr><td><tt>Bht.bsv</tt></td><td>An empty file in which you will implement a branch history table (BHT).</td></tr>
+      </tbody>
+      </table>
+
+      <h3>New assembly tests</h3>
+      <p>The following file appears in <tt>programs/assembly/src</tt>:</p>
+      <table class="table lab5-listing">
+      <thead>
+        <tr><th>Filename</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+	      <tr><td><tt>bpred_j_noloop.S</tt></td><td>An assembly test similar to <tt>bpred_j.S</tt>, but the outer loop is removed.</td></tr>
+      </tbody>
+      </table>
+
+      <h3>New source files</h3>
+      <p>The following files appear in <tt>src/</tt>:</p>
+      <table class="table lab5-listing">
+      <thead>
+        <tr><th>Filename</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><tt>TwoStage.bsv</tt></td><td>An initial two-stage pipelined RISC-V processor that uses a BTB for address prediction.
+        Compile with <tt>TWOSTAGE</tt> vproc.
+        <tr><td><tt>SixStage.bsv</tt></td><td>An empty file in which you will extend the two-stage pipeline into a six-stage pipeline.
+        Compile with <tt>SIXSTAGE</tt> vproc.</td></tr>
+        <tr><td><tt>SixStageBHT.bsv</tt></td><td>An empty file in which you will integrate a BHT into the six-stage pipeline.
+        Compile with <tt>SIXSTAGEBHT</tt> vproc.</td></tr>
+        <tr><td><tt>SixStageBonus.bsv</tt></td><td>An empty file in which you can improve the previous processor for bonus credit.
+        Compile with <tt>SIXSTAGEBONUS</tt> vproc.</td></tr>
+      </tbody>
+      </table>
+
+      There will be instruction on how to run it on fpga very soon.
+
+      <h2>Two-stage pipeline: <tt>TwoStage.bsv</tt></h2>
+      <p><tt>TwoStage.bsv</tt> contains a two-stage pipelined RISC-V processor.
+        This processor differs from the processor you built in the previous lab because it reads register values in the first stage and there is data hazard.</p>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 1 (10 Points):</strong> Debugging practice!</p>
+      <p>If you replace the BTB with a simple <tt>pc + 4</tt> address prediction, the processor still works, but it does not perform as well.
+        If you replace it with a really bad predictor that predicts <tt>pc</tt> is the next instruction for each <tt>pc</tt>, it should still work but have even worse performance because each instruction would require redirection (unless the instruction loops back to itself).
+        If you actually set the prediction to <tt>pc</tt>, you will get errors in the assembly tests; the first one will be from <tt>cache.riscv.vmh</tt>.
+        <ul>
+          <li>What is the error you get?</li>
+          <li>What is happening in the processor to cause that to happen?</li>
+          <li>Why do not you get this error with PC+4 and BTB predictors?</li>
+          <li>How would you fix it?</li>
+        </ul>
+        You do not actually have to fix this bug, just answer the questions.
+        (Hint: look at the <tt>addr</tt> field of <tt>ExecInst</tt> structure.)</p>
+      </div>
+
+      <h2>Six-stage pipeline: <tt>SixStage.bsv</tt></h2>
+      <p>The six-stage pipeline should be divided into the following stages:</p>
+      <ul>
+        <li>Instruction Fetch -- request instruction from iMem and update PC</li>
+        <li>Decode -- receive response from iMem and decode instruction</li>
+        <li>Register Fetch -- read from the register file</li>
+        <li>Execute -- execute the instruction and redirect the processor if necessary</li>
+        <li>Memory -- send memory request to dMem</li>
+        <li>Write Back -- receive memory response from dMem (if applicable) and write to register file</li>
+      </ul>
+      <p><tt>IMemory</tt> and <tt>DMemory</tt> instances should be replaced with instances of <tt>FPGAMemory</tt> to enable later implementation on FPGA.</p>
+
+      <div class="exercise"><p><strong>Exercise 1 (20 Points):</strong>
+        Starting with the two-stage implementation in <tt>TwoStage.bsv</tt>, replace each memory with <tt>FPGAMemory</tt> and extend the pipeline into a six-stage pipeline in <tt>SixStage.bsv</tt>.
+        In simulation, benchmark <tt>qsort</tt> may take longer time (21 seconds on TA's desktop, and it may take even longer on the vlsifarm machines).</p>
+      </div>
+
+      <p>Notice that the two-stage implementation uses a conflict-free register file and scoreboard.
+        However, you could use the pipelined or bypassed versions of these components for better performance.
+        Also, you may want to change the size of scoreboard.</p>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 2 (5 Points):</strong>
+        What evidence do you have that all pipeline stages can fire in the same cycle?</p>
+      </div>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 3 (5 Points):</strong>
+        In your six-stage pipelined processor, how many cycles does it take to correct a mispredicted instruction?</p>
+      </div>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 4 (5 Points):</strong>
+        If an instruction depends on the result of the instruction immediately before it in the pipeline, how many cycles is that instruction stalled?</p>
+      </div>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 5 (5 Points):</strong>
+        What IPC do you get for each benchmark?</p>
+      </div>
+
+      <h2>Adding a branch history table: <tt>SixStageBHT.bsv</tt></h2>
+      <p>The branch history table (BHT) is a structure that keeps track of the history of branches and is used in direction prediction.
+        Your BHT should be indexed by a parameterized number of bits taken from the program counter -- typically bit n+1 down to bit 2 since bits 1 and 0 will always be zero.
+        Each index should have a two-bit saturating counter.
+        Do not include any valid bits or tags in the BHT; we are not concerned about aliasing in our predictions.</p>
+
+      <div class="exercise"><p><strong>Exercise 2 (20 Points):</strong>
+        Implement a branch history table in <tt>Bht.bsv</tt> that uses a parameterizable number of bits as an index into the table.</p>
+      </div>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 6 (10 Points):</strong>
+        Planning!</p>
+      <p>One of the hardest things about this lab is properly training and integrating the BHT into the pipeline.
+        There are many mistakes that can be made while still seeing decent results.
+        By having a good plan based on the fundamentals of direction prediction, you will avoid many of those mistakes.</p>
+
+        <p>For this discussion question, state your plan for integrating the BHT into the pipeline.
+        The following questions should help guide you:</p>
+        <ul>
+          <li>Where will the BHT be positioned in the pipeline?
+          <li>What pipeline stage performs lookups into the BHT?
+          <li>In which pipeline stage will the BHT prediction be used?
+          <li>Will the BHT prediction need to be passed between pipeline stages?
+        </ul>
+        <ul>
+          <li>How to redirect PC using BHT prediction?
+          <li>Do you need to add a new epoch?
+          <li>How to handle the redirect messages?
+          <li>Do you need to change anything to the current instruction and its data structures if redirecting?
+        </ul>
+        <ul>
+          <li>How will you train the BHT?
+          <li>Which stage produces training data for the BHT?
+          <li>Which stage will use the interface method to train the BHT?
+          <li>How to send training data?
+          <li>For which instructions will you train the BHT?
+        </ul>
+        <ul>
+          <li>How will you know if your BHT works?
+        </ul>
+      </div>
+
+      <div class="exercise"><p><strong>Exercise 3 (20 Points):</strong>
+        Integrate a 256-entry (8-bit index) BHT into the six-stage pipeline from <tt>SixStage.bsv</tt>, and put the results in <tt>SixStageBHT.bsv</tt>.</p>
+      </div>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 7 (5 Points):</strong>
+        How much improvement do you see in the <tt>bpred_bht.riscv.vmh</tt> test over the processor in <tt>SixStage.bsv</tt>?</p>
+      </div>
+
+      <div class="exercise"><p><strong>Exercise 4 (10 Points):</strong>
+        Move address calculation for JAL up to the decode stage and use the redirect logic used by the BHT to redirect for these instructions too.</p>
+      </div>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 8 (5 Points):</strong>
+        How much improvement do you see in the <tt>bpred_j.riscv.vmh</tt> and <tt>bpred_j_noloop.riscv.vmh</tt> tests over the processor in <tt>SixStage.bsv</tt>?</p>
+      </div>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 9 (5 Points):</strong>
+        What IPC do you get for each benchmark?
+        How much improvement is this over the original six-stage pipeline?</p>
+      </div>
+
+      <div class="discussion exercise"><p><strong>Discussion Question 10 (Optional):</strong>
+        How long did it take you to complete this lab?</p>
+      </div>
+
+      <p>Remember to push your code with <tt>git push</tt> when you're done.</p>
+
+      <h2>Bonus improvements: <tt>SixStageBonus.bsv</tt></h2>
+      <p>This section looks at two ways to speed up indirect jumps to addresses stored in registers (JALR).</p>
+
+      <div class="exercise"><p><strong>Exercise 5 (10 Bonus Points):</strong>
+        JALR instructions have known target addresses in the register fetch stage.
+        Add a redirection path for JALR instructions in the register fetch stage and put the results in <tt>SixStageBonus.bsv</tt>.
+        The <tt>bpred_ras.riscv.vmh</tt> test should give slightly better results with this improvement.</p>
+        <p>Most JALR instructions found in programs are used as returns from function calls.
+        This means the target address for such a return was written into the return address register <tt>x1</tt> (also called <tt>ra</tt>) by a previous JAL or JALR instruction that initiates the function call.</p>
+      </div>
+
+      <p>To make better prediction of JALR instructions, we can introduce the return address stack (RAS) to our processor.
+        According to RISC-V ISA, a JALR instruction with <tt>rd=x0</tt> and <tt>rs1=x1</tt> is commonly used as the return instruction from a function call.
+        Besides, a JAL or JALR instruction with <tt>rd=x1</tt> is commonly used as the jump to initiate a function call.
+        Therefore, we should push the RAS for JAL/JALR instruction with <tt>rd=x1</tt>, and pop the RAS for JALR instruction with <tt>rd=x0</tt> and <tt>rs1=x1</tt>.
+
+      <div class="exercise"><p><strong>Exercise 6 (10 Bonus Points):</strong>
+        Implement a return address stack and integrate it into the Decode stage of your processor (<tt>SixStageBonus.bsv</tt>).
+        An 8 element stack should be enough.
+        If the stack fills up, you could simply discard the oldest data.
+        The <tt>bpred_ras.riscv.vmh</tt> test should give an even better result with this improvement.
+        If you implemented the RAS in a separate BSV file, make sure to add it to the git repository for grading.</p>
+      </div>
+    </div>
+
+        <div class="container">
+      <hr>
+      <footer class="footer">
+        <div class="container">
+          <p class="footer">&copy; 2016 <a href="http://web.mit.edu">Massachusetts Institute of Technology</a>. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="../js/jquery-3.1.0.min.js"></script>
+    <script src="../js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+/* many thanks to http://stackoverflow.com/questions/7717527/smooth-scrolling-when-clicking-an-anchor-link */
+$(document).on('click', 'a', function(event){
+    var href = $.attr(this, 'href');
+    var hash = href.indexOf("#");
+    var doc = location.pathname.substring(location.pathname.lastIndexOf("/") + 1);
+    console.log(doc);
+    if (hash !== -1 && href.substring(0, hash) === doc) {
+      event.preventDefault();
+      $('html, body').animate({
+          scrollTop: $( href.substring(hash) ).offset().top
+      }, 500);
+    }
+});
+    </script>
+
+
+  </body>
+</html>

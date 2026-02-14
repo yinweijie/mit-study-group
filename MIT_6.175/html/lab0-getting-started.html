@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="MIT 6.175 Fall 2017">
+    <meta name="author" content="Quan Nguyen">
+    <!-- <link rel="icon" href="favicon.ico"> -->
+
+    <title>MIT 6.175 - Constructive Computer Architecture | Lab 0: Getting Started</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/6175.css" rel="stylesheet">
+
+  </head>
+
+  <body>
+
+        <!-- Static navbar -->
+    <nav class="navbar navbar-default navbar-static-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="../index.html">6.175</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+          <ul class="nav navbar-nav">
+            <li><a href="../index.html#schedule">Schedule</a></li>
+            <li class="active"><a href="../labs.html">Labs</a></li>
+            <li><a href="../course-info.html">Course Information</a></li>
+            <li><a href="../resources.html">Resources</a></li>
+            <li><a href="../contact.html">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+
+    <h1 id="page-header">Lab 0: Getting Started</h1>
+
+    <div class="container content">
+      <p>Throughout this course, you will use shared machines for working on the labs.
+        These machines include <span class="address">vlsifarm-03.mit.edu</span> through <span class="address">vlsifarm-08.mit.edu</span>.
+        You can log into these machines through ssh using your Athena username and password.</p>
+      <p>This document will instruct you how do some things required for lab such as obtaining initial code for each lab.
+        Begin by using an ssh client to log into one of the servers named above.</p>
+
+      <h2>Setting up the toolchain</h2>
+      <p>Execute the following commands to set up your environment and gain access to the tool-chain:</p>
+      <pre class="commands">$ add 6.175
+$ source /mit/6.175/setup.sh</pre>
+
+      <p>The first command gives you access to the course locker <span class="dir">/mit/6.175</span> and only needs to be run once per computer.
+        The second command configures your current environment to include tools required for the lab and needs to be run every time you log in to work on classwork.</p>
+
+      <h2>Using Git to get and submit lab code</h2>
+      <p>The reference designs are provided in Git repositories.
+        You can clone them into your work directory using the following command (substitute <span class="dir">labN</span> with the lab number, such as lab1 and lab2, when they will be released. Right now you can only try to clone me, lab0, but there is not much reference code involved in this lab, as you will see.):</p>
+      <pre>$ git clone $GITROOT/labN.git</pre>
+
+      <p class="bg-warning"><strong>Note:</strong> If "git clone" fails, it's probably because we don't have your Athena user name.
+        Send me an email (to <span class="address">bthom mit</span>) and I'll create a remote repository for you.</p>
+
+      <p>This command creates a <span class="dir">labN</span> directory in your current directory.
+        The <span class="dir">$GITROOT</span> environment variable is unique to you, so this repository will be your personal repository.
+        Inside that directory, the test benches will be run using the directions specified in the lab handouts.</p>
+      <p>Discussion questions should be answered in <span class="dir">discussion.txt</span> file supplied with the rest of the code.</p>
+      <p>Then this is a standard git workflow.</p>
+      <p>If you want to add any new files in addition to what has been supplied by the TAs, you need to add the new file (in this example, <span class="dir">newFile</span> in git using:</p>
+      <pre>$ git add newFile</pre>
+
+      <p>You can locally commit your code whenever you hit a milestone using:</p>
+      <pre>$ git commit -m "Hit milestone"</pre>
+
+      <p>Submit your code by adding any necessary files and then using:</p>
+      <pre>$ git commit -m "Finished lab"
+$ git push</pre>
+      
+      <p>You can submit multiple times before the deadline if necessary.</p>
+
+      <h2>Writing Bluespec SystemVerilog (BSV) for the labs</h2>
+
+      <h3>On <span class="address">vlsifarm-0x</span></h3>
+      <p>6.175 will be a great opportunity to learn how to work in a Linux command-line environment if you are not already familiar with it.
+        To test your BSV code, you need to use a Linux environment to run <span class="command">bsc</span>, the BSV compiler.
+        It makes sense to go ahead and write the BSV code on the same machine.
+      <p>While there are many text editors you can use, there is only Bluespec-provided BSV syntax highlighting for Vim and Emacs.
+        The Vim syntax highlighting files can be installed by running:</p>
+      <pre>$ /mit/6.175/vim_copy_BSV_syntax.sh</pre>
+
+      <p>The Emacs syntax highlighting files can be found on the <a href="../resources.html">course resources</a> page.
+      If you need help to install it, send me an email (bthom mit).</p>
+
+      <h3>On the Athena cluster</h3>
+      <p>Your home directory on the <span class="address">vlsifarm</span> machines is the same as your home directory on any Athena machine.
+        Therefore you can write code on an Athena machine using gedit or another graphical text editor and log into a <span class="address">vlsifarm</span> machine to run it.</p>
+
+      <h3>On your own machine</h3>
+      <p>You can also use file transfer programs to move files between your Athena home directory and your own machine.
+        MIT has help for securely transferring files between machines on the web at <a href="http://ist.mit.edu/software/filetransfer">http://ist.mit.edu/software/filetransfer</a>.</p>
+
+      <h2>Compiling BSV on other machines</h2>
+      <p>BSV can also be compiled on non-<span class="address">vlsifarm</span> machines.
+        This may be useful when the <span class="address">vlsifarm</span> machines are busy near lab deadlines.</p>
+
+      <h3>On the Athena cluster</h3>
+      <p>The instructions used for the <span class="address">vlsifarm</span> machines will also work for the Linux-based Athena machines.
+        Just open a terminal and run the commands as you would run them on the <span class="address">vlsifarm</span> machines.</p>
+
+      <h3>On your own Linux-based machine</h3>
+      <p>To run the 6.175 labs on your own Linux-based machine, you will need the following software installed on your computer:</p>
+      <ul>
+        <li>OpenAFS to access the course locker</li>
+        <li>Git to access and submit the labs</li>
+        <li><a href="https://gmplib.org/">GMP (<span class="command">libgmp.so.3</span>)</a> to run the BSV compiler</li>
+        <li>Python to run build scripts</li>
+      </ul>
+
+      <p class="bg-info"><strong>Side note:</strong> A similar setup may work for Mac OS X / macOS.
+        If you get such a setup working, please provide details to the TA.</p>
+
+      <h4>OpenAFS</h4>
+      <p>Installing OpenAFS on your local machine will give you access to the directory <span class="dir">/afs/athena.mit.edu</span> that contains all of the course lockers.
+        You will have to create your own <span class="dir">/mit</span> folder with symlinks within to point to the necessary course lockers.</p>
+      <p>CSAIL TIG has some information about how to install OpenAFS for Ubuntu at <a href="http://tig.csail.mit.edu/wiki/TIG/OpenAFSOnUbuntuLinux">http://tig.csail.mit.edu/wiki/TIG/OpenAFSOnUbuntuLinux</a>.
+        These instructions are for accessing <span class="dir">/afs/csail.mit.edu</span>, but you need access to <span class="dir">/afs/athena.mit.edu</span> for the lab, so replace <span class="dir">csail</span> with <span class="dir">athena</span> wherever you see it.
+        When you install OpenAFS on your machine, it gives you a <span class="dir">/afs</span> folder with many domains within.
+        This website also contains the instructions for logging in with your user name and password to gain access to the files that require authentication. You will need to do this every day you work on the lab, or every time you reset your computer, in order to access the 6.175 course locker.</p>
+        <p>Next you need to make a folder named <span class="dir">mit</span> in your root directory and populate it with a symlink to the course repository. On Ubuntu and similar distributions, the commands are:</p>
+      <pre>$ cd /
+$ sudo mkdir mit
+$ cd mit
+$ sudo ln -s /afs/athena.mit.edu/course/6/6.175 6.175</pre>
+      You can now access the course locker in the folder /mit/6.175.
+
+      <h4>Git</h4>
+      <p>On Ubuntu and similar distributions, you can install Git with</p>
+      <pre>$ sudo apt-get install git</pre>
+
+      <h4>GMP (libgmp.so.3)</h4>
+      <p>The BSV Compiler uses libgmp for unbounded integers. To install it on Ubuntu and similar distributions, use the command</p>
+      <pre>$ sudo apt-get install libgmp3-dev</pre>
+      <p>If you have libgmp installed on your machine, but you do not have libgmp.so.3, you can create a symlink
+      named libgmp.so.3 that points to a different version.</p>
+
+      <h4>Python</h4>
+      <p>On Ubuntu and similar distributions, you can install Python with</p>
+      <pre>$ sudo apt-get install python</pre>
+      <h4>Setting up the toolchain on your Linux-based machine</h4>
+      <p>The original setup.sh script will not work on your machine, so instead you will have to use</p>
+      <pre>$ source /mit/6.175/local_setup.sh</pre>
+      <p>to set up the toolchain. Once you have done this, you should be able to use the tools as usual on your own machine.</p>
+
+    </div>
+
+        <div class="container">
+      <hr>
+      <footer class="footer">
+        <div class="container">
+          <p class="footer">&copy; 2016 <a href="http://web.mit.edu">Massachusetts Institute of Technology</a>. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="../js/jquery-3.1.0.min.js"></script>
+    <script src="../js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+/* many thanks to http://stackoverflow.com/questions/7717527/smooth-scrolling-when-clicking-an-anchor-link */
+$(document).on('click', 'a', function(event){
+    var href = $.attr(this, 'href');
+    var hash = href.indexOf("#");
+    var doc = location.pathname.substring(location.pathname.lastIndexOf("/") + 1);
+    console.log(doc);
+    if (hash !== -1 && href.substring(0, hash) === doc) {
+      event.preventDefault();
+      $('html, body').animate({
+          scrollTop: $( href.substring(hash) ).offset().top
+      }, 500);
+    }
+});
+    </script>
+
+
+  </body>
+</html>

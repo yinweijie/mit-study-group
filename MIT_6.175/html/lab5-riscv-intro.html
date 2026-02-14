@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="MIT 6.175 Fall 2016">
+    <meta name="author" content="Quan Nguyen">
+    <!-- <link rel="icon" href="favicon.ico"> -->
+
+    <title>MIT 6.175 - Constructive Computer Architecture | Lab 5: RISC-V Introduction -- Multi-Cycle and Two-Stage Pipeline</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/6175.css" rel="stylesheet">
+
+  </head>
+
+  <body>
+
+        <!-- Static navbar -->
+    <nav class="navbar navbar-default navbar-static-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="../index.html">6.175</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+          <ul class="nav navbar-nav">
+            <li><a href="../index.html#schedule">Schedule</a></li>
+            <li class="active"><a href="../labs.html">Labs</a></li>
+            <li><a href="../course-info.html">Course Information</a></li>
+            <li><a href="../resources.html">Resources</a></li>
+            <li><a href="../contact.html">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+
+    <h1 id="page-header">Lab 5: RISC-V Introduction &mdash; Multi-Cycle and Two-Stage Pipeline</h1>
+
+    <div class="container content">
+      <div class="bg-warning">
+        <p><strong>Lab 5 due date:</strong> Wednesday, October 18, 2016, at 11:59:59 PM EDT.</p>
+        <p>Your deliverables for Lab 5 are:</p>
+        <ul>
+          <li>your answers to Exercises 1-4 in <tt>TwoCycle.bsv</tt>, <tt>FourCycle.bsv</tt>, <tt>TwoStage.bsv</tt>, and <tt>TwoStageBTB.bsv</tt></li>
+          <li>your answers to Discussion Questions 1-4 in <tt>discussion.txt</tt></li>
+        </ul>
+      </div>
+
+    <h2>Introduction</h2>
+    <p>This lab introduces the RISC-V processor and the toolflow associated with it.
+      The lab begins with the introduction of a single-cycle implementation of a RISC-V processor.
+      You will then create two- and four-cycle implementations driven by memory structural hazards.
+      You will finish by creating a two-stage pipelined implementation so the fetch and execute stages happen in parallel.
+      This two-stage pipeline will be the basis for future pipelined implementations.</p>
+
+    <h2>The processor infrastructure</h2>
+    <p>A large amount of work has already been done for you in setting up the infrastructure to run, test, evaluate performance, and debug your RISC-V processor in simulation and on an FPGA.
+      The processor designs for this lab cannot be run on FPGAs because of the type of memory used.</p> <!-- %, but the next lab will be able to be synthesized for an FPGA. -->
+
+    <h3>Initial code</h3>
+    <p>The code provided for this lab has three directories in it:</p>
+    <ul>
+      <li><tt>programs/</tt> contains RISC-V programs in assembly and C.</li>
+      <li><tt>connectal/</tt> contains the infrastructure for compiling and simulating the processors.</li>
+      <li><tt>src/</tt> contains BSV code for the RISC-V processors.</li>
+    </ul>
+
+    <p> The first thing to do, just after cloning your repository is to do <pre>bash init.sh</pre>. You will have to do that only once.</p>
+    <p>Within the BSV source folder, there is a folder <tt>src/includes/</tt> which contains the BSV code for all the modules used in the RISC-V processors.
+      You will not need to change these files for this lab.
+      These files are briefly explained below.</p>
+
+    <table class="table lab5-listing">
+      <thead>
+        <tr><th>Filename</th><th>Contents</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><tt>Btb.bsv</tt></td><td>Implementations of a branch target buffer address predictor.</td></tr>
+        <tr><td><tt>CsrFile.bsv</tt></td><td>Implementation of CSRs (including <tt>mtohost</tt>, which communicates with the host machine).</td></tr>
+        <tr><td><tt>DelayedMemory.bsv</tt></td><td>Implementation of memory with one-cycle delay.</td></tr>
+        <tr><td><tt>DMemory.bsv</tt></td><td>Implementation of the data memory with combinational reads and writes using a massive register file.</td></tr>
+        <tr><td><tt>Decode.bsv</tt></td><td>Implementation of the instruction decoding.</td></tr>
+        <tr><td><tt>Ehr.bsv</tt></td><td>Implementation of EHRs as described in the lectures.</td></tr>
+        <tr><td><tt>Exec.bsv</tt></td><td>Implementation of the instruction execution.</td></tr>
+        <tr><td><tt>Fifo.bsv</tt></td><td>Implementation of a variety of FIFOs using EHRs as described in the lectures.</td></tr>
+        <tr><td><tt>IMemory.bsv</tt></td><td>Implementation of the instruction memory with combinational reads using a massive register file.</td></tr>
+        <tr><td><tt>MemInit.bsv</tt></td><td>Modules for downloading the initial contents of instruction and data memories from the host PC.</dd>
+        <tr><td><tt>CMemTypes.bsv</tt></td><td>Common types relating to memory.</td></tr>
+        <tr><td><tt>ProcTypes.bsv</tt></td><td>Common types relating to the processor.</td></tr>
+        <tr><td><tt>RFile.bsv</tt></td><td>Implementation of the register file.</td></tr>
+        <tr><td><tt>Types.bsv</tt></td><td>Common types.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>The setup</h3>
+    <table class="figures">
+      <tr><td><img src="lab5/setup.svg" alt="Setup"></td></tr>
+      <tr><td>Figure 1: Setup</td></tr>
+    </table>
+    <p>Figure 1 shows the setup for the lab.
+      When designing and debugging a processor, we will often need the help of another processor, which we call the <em>host</em> processor (labeled "Host" in Figure 1).
+      To differentiate it from the host, we may refer to the processor you'll be designing (labeled "Core" in Figure 1) as the <em>target</em> processor.
+      The setup instantiates the processor from the specified processor BSV file and Connectal ports for the processor's hostToCpu, cpuToHost, iMemInit, and dMemInit interfaces.
+      </p>
+
+    <p>Since we only run the processor in simulation in this lab, we will bypass the time-consuming phase of initializing the memory through iMemInit and dMemInit interfaces.
+      Instead, we directly load the memory with desired values using memory initialization files (.vmh files introduced in <a href="lab5-riscv-intro.html#prog">Compiling the Assembly Tests and Benchmarks</a>) when the simulation starts, and we will re-launch simulation for each program.</p>
+  
+   <p> In this lab you will build several version of a processor. They will be defined in OneCyle.bsv, FourCycle.bsv, TwoStage.bsv ... 
+
+    The idea is that to build the processor in OneCycle.bsv you will do 
+<pre>
+make build.bluesim VPROC=ONECYCLE </pre>
+    This will create a new folder <tt>bluesim</tt>. You should expect this to take approximatively forever.
+    
+    To remove this directory (and so restart a build from fresh), you should do
+<pre>
+make clean
+</pre>
+You may want to do that between every processor you build. The reason for that is that if
+you compile for OneCycle and then compile for TwoCycle but your two cycle
+implementation breaks at type checking, there is a chance that when you run your processor
+(with make run.bluesim, or run_asm.sh, as you will see soon in this document), you will run the
+OneCycle, because the TwoCycle never managed to compile.  </p>
+
+    <h3 id="prog">Compiling the Assembly Tests and Benchmarks</h3>
+    <p>Our test bench runs RISC-V programs specified in Verilog Memory Hex (vmh) format.
+      The <tt>programs/assembly</tt> directory contains source code for assembly tests, and the <tt>programs/benchmarks</tt> directory contains source code for benchmark programs. 
+      We will use these programs to test the processor for correctness and performance.
+      A Makefile is provided under each directory for generating programs in the <tt>.vmh</tt> format.</p>
+
+    <p>To compile all the assembly tests, go to the <tt>programs/assembly</tt> directory and run <tt>make</tt>.
+      This will create a new directory called <tt>programs/build/assembly</tt>, which contains compilation results for all assembly tests.
+      The <tt>vmh</tt> subdirectory under it contains all the .vmh files, and the <tt>dump</tt> subdirectory contains all the dumped assembly codes.
+      If you forget to do this, you'll get an error message in the style of :</p>
+    <pre>
+ERROR: programs/build/assembly/vmh/simple.riscv.vmh does not exit</pre>
+
+    <p>Similarly, go to the <tt>programs/benchmarks</tt> directly and run the <tt>make</tt> command to compile all benchmarks.
+      The compilation results will be in <tt>programs/build/benchmarks</tt> directory.</p>
+
+    <p>Compile the assembly tests and benchmarks now.
+      The RISC-V toolchain should work on all vlsifarm machines, but they may <em>not</em> work on the normal Athena cluster machines.
+      We recommend that you compile these programs on the vlsifarm machines, at least <em>at first</em> &mdash; then, you can use ordinary Athena cluster machines to work on this lab.</p>
+
+    <p>The .vmh files in the <tt>programs/build/assembly/vmh</tt> directory are assembly tests, and they are introduced below:</p>
+      <!--%These are microbenchmarks written in assembly which test specific instructions or to give specific performance results and are explained below:
+          %% TODO: Double check -->
+    <table class="table lab5-listing">
+      <thead>
+        <tr><th>Filename</th><th>Contents</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><tt>simple.riscv.vmh</tt></td><td>Contains the basic infrastructure code for assembly tests and runs 100 NOP instructions ("NOP" is short for "No Operation").</td></tr>
+        <tr><td><tt>bpred_bht.riscv.vmh</tt></td><td>Contains many branches that a branch history table can predict well.</td></tr>
+        <tr><td><tt>bpred_j.riscv.vmh</tt></td><td>Contains many jump instructions that a branch target buffer can predict well.</td></tr>
+        <tr><td><tt>bpred_ras.riscv.vmh</tt></td><td>Contains many jumps via registers that a return address stack (RAS) can predict well.</td></tr>
+        <tr><td><tt>cache.riscv.vmh</tt></td><td>Tests a cache by writing to and reading from addresses that would alias in a smaller memory.</td></tr>
+        <tr><td><tt>&lt;inst&gt;.riscv.vmh</tt></td><td>Tests a specific instruction.</td></tr>
+      </tbody>
+    </table>
+    <p>Each assembly test will print the cycle count, instruction count, and whether the test passes or fails.
+      An example output for simple.riscv.vmh on a single-cycle processor is </p>
+    <pre>102
+103
+PASSED</pre>
+
+    <p>The first line is the cycle count, the second line is the instruction count, and the last line shows that the test passes.
+      The instruction count is larger than the cycle count because we read the instruction count CSR (<tt>instret</tt>) after reading the cycle count CSR (<tt>cycle</tt>).
+      If the test fails, the last line will be</p>
+    <pre>FAILED exit code = &lt;failure code&gt;</pre>
+    <p>You can use the failure code to locate the problem by looking into the source code of the assembly test.</p>
+
+    <p>It is highly recommended that you re-run all the assembly tests after making any changes to your processor to verify that you didn't break anything.
+      When trying to locate a bug, running the assembly tests will narrow down the possibilities of problematic instructions.</p>
+
+    <p>The benchmarks in <tt>programs/build/benchmarks/</tt> evaluate the performance of your processor.
+    These benchmarks are briefly introduced below:</p>
+
+    <table class="table lab5-listing">
+      <thead>
+        <tr><th>Filename</th><th>Function</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><tt>median.riscv.vmh</tt></td><td>1-D three element median filter.</td></tr>
+        <tr><td><tt>multiply.riscv.vmh</tt></td><td>Software multiplication.</td></tr>
+        <tr><td><tt>qsort.riscv.vmh</tt></td><td>Quicksort.</td></tr>
+        <tr><td><tt>towers.riscv.vmh</tt></td><td>Tower of Hanoi.</td></tr>
+        <tr><td><tt>vvadd.riscv.vmh</tt></td><td>Vector-vector addition.</td></tr>
+      </tbody>
+    </table>
+
+    <p>Each benchmark will print its name, the cycle count, the instruction count, the return value, and whether it passes or fails.
+      An example output for the median benchmark on a single-cycle processor is
+    <pre>Benchmark median
+Cycles = 4014
+Insts  = 4015
+Return 0
+PASSED</pre>
+
+    <p>If the benchmark passes, the last two lines should be <tt>Return 0</tt> and <tt>PASSED</tt>.
+      If the benchmark fails, the last line will be</p>
+    <pre>FAILED exit code = &lt;failure code&gt;</pre>
+
+    <p>Performance is measured in instructions-per-cycle (IPC), and we generally want to increase IPC.
+      For our pipeline we can never exceed an IPC of 1, but we should be able to get close to it with a good branch predictor and proper bypassing.</p>
+
+    <h3>Using the testbench</h3>
+    <p>Our test bench is software running on the host processor which interacts with the RISC-V processor over Connectal, as shown in Figure 1.
+      The test bench starts the processor and handles <tt>toHost</tt> requests until the processor indicates it has completed, either successfully or unsuccessfully.
+      For example, the cycle count in the test output are actually <tt>toHost</tt> requests from the processor to print an integer, and the requests are handled by the test bench by printing the integer out.
+      The last line (i.e. <tt>PASSED</tt> or <tt>FAILED</tt>) of the test output is also printed out by the test bench based on the <tt>toHost</tt> request which indicates the end of processing.</p>
+
+    <p>To run the test bench, first build the project as described in <a href="lab5-riscv-intro.html#build">Building the Project</a> and compile the RISC-V programs as described in <a href="lab5-riscv-intro.html#prog">Compiling the Assembly Tests and Benchmarks</a>.
+      In simulation, our RISC-V processor always loads the file <tt>bluesim/mem.vmh</tt> to initialize the (data) memory.
+      Therefore, we only need to copy the .vmh file (which corresponds to the instruction memory) of the test program that we want to run.</p>
+
+    <p>For example, to run the median benchmark on the processor in simulation you could use the commands from the top directory:</p>
+        <pre>$ cp programs/build/benchmarks/vmh/median.riscv.vmh bluesim/mem.vmh
+$ make run.bluesim 1> log 
+</pre>
+<p> Under the hood <pre>make run.bluesim</pre> just call <pre>bluesim/bin/ubuntu.exe</pre>.</p> 
+<p> This creates a file <tt>log</tt> that contains the trace of your execution. </p>
+    <p>For your convenience, we have provided scripts <tt>run_asm.sh</tt> and <tt>run_bmarks.sh</tt>, which run all the assembly tests and benchmarks respectively.
+      The standard output (stdout) will be redirected to <tt>logs/&lt;test name&gt;.log</tt>.</p>
+
+    <h3>Test bench output</h3>
+    <p>There are two sources of outputs from RISC-V simulation.
+      These include BSV <tt>$display</tt> statements (both messages and errors) and RISC-V print statements.<!-- %, and VCD waveform dumps.--></p>
+    <!-- %Debugging the trickiest bugs sometimes takes all three.-->
+
+    <p>BSV <tt>$display</tt> statements are printed to stdout by <tt>bsim_dut</tt>.
+      BSV can also print to standard error (stderr) using <tt>$fwrite(stderr, ...)</tt> statements.
+      The scripts <tt>run_asm.sh</tt> and <tt>run_bmarks.sh</tt> redirect the stdout  to the <tt>logs/&lt;test name&gt;.log</tt> file.</p>
+
+    <p>RISC-V print statements (e.g., <tt>printChar</tt>, <tt>printStr</tt> and <tt>printInt</tt> functions in <tt>programs/benchmarks/common/syscall.c</tt>) are handled through moving characters and integers to the <tt>mtohost</tt> CSR.
+      The test bench reads from the <tt>cpuToHost</tt> interface and prints characters and integers to stderr when it receives them.</p>
+
+<!-- \begin{comment}
+VCD waveform dumps are saved only when <tt>bsim_dut</tt> is called with the <tt>-V</tt> flag and a file name like this:
+<pre>$ ./bsim_dut -V qsort.vcd &gt; qsort.out &amp;
+$ ./tb ../../programs/build/qsort.bench.vmh</pre>
+These waveforms can then be explored using gtkwave from the Bluespec Workstation module viewer.
+\end{comment} -->
+    <div class="exercise"><p><strong>Exercise 0 (0 Points):</strong>
+      Compile the test programs by going to the <tt>programs/assembly</tt> and <tt>programs/benchmarks</tt> directories and running <tt>make</tt>.
+      Compile the one-cycle RISC-V implementation and test it by going to the top directory of your lab and using the following commands:</p>
+      <pre>$ make build.bluesim VPROC=ONECYCLE
+$ ./run_asm.sh
+$ ./run_bmarks.sh</pre>
+      <p>During the compilation of BSV code,  you may see lots of warnings. 
+        Those warnings are probably for the Connectal infrastructure, and you generally do not need to be concerned about them.
+      </p>
+    </div>
+
+   <!-- <div class="bg-info"><p><strong>Helpful tip:</strong> Running</p>
+    <pre>$ ./clean</pre>
+      <p>while in the <tt>scemi/sim</tt> directory will remove any files built using <tt>build</tt>.</p>
+    </div> -->
+
+    <h3 id="coping">Coping with AFS timeout problems</h3>
+    <p>While running the build tool, AFS timeout errors can look like this:</p>
+    <pre>   ...
+code generation for mkBypassRFile starts
+Error: Unknown position: (S0031)
+  Could not write the file `bdir_dut/mkBypassRFile.ba':
+    timeout
+tee: ./onecycle_compile_for_bluesim.log: Connection timed out
+!!! Stage compile_for_bluesim command encountered an error -- aborting build.
+!!! Look in the log file at ./onecycle_compile_for_bluesim.log for more information.</pre>
+
+    <p>For a variety of reasons, AFS can time out, causing your Bluespec builds to fail.
+      We can move our build directories to a location outside of AFS, which can mitigate this problem.
+      First, create a directory in <tt>/tmp</tt>:</p>
+    <pre>$ mkdir /tmp/&lt;your_user_name&gt;-lab5</pre>
+
+    <p>When you're done with this lab, please remember to delete your <tt>tmp</tt> directory.</p>
+
+    <h2>Multi-cycle RISC-V implementations</h2>
+
+    <p>The provided code, <tt>src/OneCycle.bsv</tt>, implements a one-cycle Harvard architecture RISC-V processor.
+      (The Harvard architecture has separate instruction and data memories.)
+      This processor is able to do operations in a single cycle because it has separate instruction and data memories, and each memory gives responses to loads in the same cycle.
+      In this portion of the lab, you will make two different multicycle implementations motivated by more realistic memory structural hazards.</p>
+
+    <h3>Two-cycle von Neumann architecture RISC-V implementation</h3>
+    <p>An alternative to the Harvard architecture is the von Neumann architecture.
+      (The von Neumann architecture is also called the Princeton architecture.)
+      The von Neumann architecture has instructions and data stored in the same memory.
+      If there is only one memory that holds both instructions and data, then there is a structural hazard (assuming the memory cannot be accessed twice in the same cycle).
+      To get around this hazard, you can split the processor into two cycles: <em>instruction fetch</em> and <em>execute</em>.</p>
+    <ol>
+        <li>In the <em>instruction fetch</em> stage, the processor reads the current instruction from the memory and decodes it.</li>
+        <li>In the <em>execute</em> stage, the processor Reads the register file, executes instructions, does ALU operations, does memory operations, and writes the result to the register file.</li>
+    </ol>
+    <p>When creating a two-cycle implementation, you will need a register to keep intermediate data between the two stages, and you will need a state register to keep track of the current state.
+      The intermediate data register will be written to during instruction fetch, and it will be read from during execute.
+      The state register will toggle between instruction fetch and execute.
+      To make things easier, you can use the provided <tt>Stage</tt> typedef as the type for the state register.</p>
+
+    <div class="exercise"><p><strong>Exercise 1 (15 Points):</strong>
+      Implement a two-cycle RISC-V processor in <tt>TwoCycle.bsv</tt> using a single memory for instructions and data.
+      The module <tt>mem</tt> has been provided for you to use as your single memory.
+      Test this processor by going to the top directory of your lab and using the following commands:</p>
+      <pre>$ make build.bluesim VPROC=TWOCYCLE
+$ ./run_asm.sh
+$ ./run_bmarks.sh</pre>
+    </div>
+
+    <h3>Four-cycle RISC-V implementation to support memory latency</h3>
+
+    <p>The one- and two-cycle RISC-V processors assume a memory that has combinational reads; that is, if you set the read address, then the data from the read will be valid during the same clock cycle.
+      Most memories have reads with longer latencies: first you set the address bits, and then the read result is ready on the next clock cycle.
+      If we change the memory in the previous RISC-V processor implementations to a memory with a read latency, then we introduce another structural hazard: results from reads cannot be used in the same cycle as the reads are performed.
+      This structural hazard can be avoided by further splitting the processor into four cycles: <em>instruction fetch</em>, <em>instruction decode</em>, <em>execute</em>, and <em>write back</em>.</p>
+    <ol>
+        <li>The <em>instruction fetch</em> stage, as before, sets the address lines on the memory to <tt>PC</tt> to read the current instruction.</li>
+        <li>The <em>instruction decode</em> stage gets the instruction from memory, decodes it, and reads registers.</li>
+        <li>The <em>execute</em> stage performs ALU operations, writes data to the memory for store instructions, and sets memory address lines for read instructions.</li>
+        <li>The <em>write back</em> stage obtains the result from the ALU or reads the result from memory (if any) and writes the register file.</li>
+    </ol>
+    <p>This processor will require more hardware between stages and an expanded state register.
+      You can use the modified <tt>Stage</tt> typedef as the type for the state register.</p>
+
+    <p>A one-cycle read latency memory is implemented by <tt>mkDelayedMemory</tt>.
+      This module has an interface, <tt>DelayedMemory</tt>, that decouples memory requests and memory responses.
+      Requests are still made in the same way using <tt>req</tt>, but this method no longer returns the response at the same time.
+      In order to get the results of a requested load, you have to call the <tt>resp</tt> action value method in a later clock cycle to get the memory response from the previous read.
+      A store request will not generate any response, so you should not call the <tt>resp</tt> method for stores.
+      More details can be found in the source file <tt>DelayedMemory.bsv</tt> in <tt>src/includes</tt>.</p>
+    
+<div class="exercise"><strong>Exercise 2 (15 Points):</strong><p>Implement a four-cycle RISC-V processor in <tt>FourCycle.bsv</tt> as described above.
+      Use the delayed memory module <tt>mem</tt> already included in <tt>FourCycle.bsv</tt> for both instruction and data memory.
+      Test this processor using the following command:</p>
+      <pre>$ make build.bluesim VPROC=FOURCYCLE
+$ ./run_asm.sh
+$ ./run_bmarks.sh</pre>
+    </div>
+
+    <h2>Two-stage pipelined RISC-V implementation</h2>
+
+    <p>While the two-cycle and four-cycle implementations allow for processors that handle certain structural hazards, they do not perform well.
+      All processors today are pipelined to increase performance, and they often have duplicated hardware to avoid structural hazards such as the memory hazards seen in the two- and four-cycle RISC-V implementations.
+      Pipelining introduces many more data and control hazards for the processor to handle.
+      To avoid data hazards for now, we will only look at a two-stage pipeline.</p>
+
+    <p>The two-stage pipeline uses the way the two-cycle implementation splits the work into two stages, and it runs these stages in parallel using separate instruction and data memories.
+      This means as one instruction is being executed, the next instruction is being fetched.
+      For branch instructions, the next instruction is not always known.
+      This is known as a <em>control hazard</em>.</p>
+
+    <p>To handle this control hazard, use a PC+4 predictor in the fetch stage and correct the PC when <em>branch mispredictions</em> occur.
+    The <tt>mispredict</tt> field of <tt>ExecInst</tt> will be useful here.</p>
+
+    <div class="exercise"><strong>Exercise 3 (30 Points):</strong><p>Implement a two-cycle pipelined RISC-V processor in <tt>TwoStage.bsv</tt> using separate instruction and data memories (with combinational reads, just like the memories from <tt>OneCycle.bsv</tt>).
+      You can implement either an inelastic or elastic pipeline.
+      Test this processor using the following command:
+      <pre>$ make build.bluesim VPROC=TWOSTAGE
+$ ./run_asm.sh
+$ ./run_bmarks.sh</pre>
+    </div>
+
+    <h3>Instructions per cycle (IPC)</h3>
+
+    <p>Processor performance is often measured in instructions per cycle (IPC).
+      This metric is a measure of throughput, or how many instructions are completed per cycle on average.
+      To calculate IPC, divide the number of instructions completed by the number of cycles it took to complete them.
+      The one-cycle implementation has an IPC of 1.0, but it will inevitably require a long clock period to account for propagation delay.
+      As a result, our one-cycle processor is not as fast as it sounds.
+      The two-cycle and four-cycle implementations achieve 0.5 and 0.25 IPC respectively.</p>
+
+    <p>The pipelined implementation of the processor will achieve somewhere between 0.5 IPC and 1.0 IPC.
+    Branch mispredictions reduce a processor's IPC, so the accuracy of your PC+4 next address predictor is crucial to having a processor with high IPC.
+
+    <div class="exercise discussion"><p><strong>Discussion Question 1 (5 Points):</strong>
+      What is the IPC for the two-stage pipelined processor for each benchmark tested by the <tt>run_bmarks.sh</tt> script?</p>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 2 (5 Points):</strong>
+      What is the formula to compute the next address predictor accuracy from the IPC?
+      (Hint, how many cycles does it take to execute an instruction when the PC+4 prediction is correct? What about when it is incorrect?)
+      Using this formula, what is the accuracy of the PC+4 next address predictor for each benchmark?</p>
+    </div>
+
+    <h3>Next address prediction</h3>
+
+    <p>Now, let's use a more advanced next address predictor.
+      One such example is a branch target buffer (BTB).
+      It predicts the location of the next instruction to fetch based on the current value of the program counter (the PC).
+      For the vast majority of instructions, this address is PC + 4 (assuming all instructions are 4 bytes).
+      However, this isn't true for jumps and branches.
+      So, a BTB contains a table of previously-used next addresses ("branch targets") that were not simply PC+4, and the PCs that generated those branch targets.</p>
+
+    <p><tt>Btb.bsv</tt> contains an implementation of a BTB.
+      Its interface has two methods: <tt>predPc</tt> and <tt>update</tt>.
+      The method <tt>predPc</tt> takes the current PC and it returns a prediction.
+      The method <tt>update</tt> takes a program counter and the next address for the instruction at that program counter and adds it as a prediction if it is not PC+4.</p>
+
+    <p>The <tt>predPc</tt> method should be called to predict the next PC, and the <tt>update</tt> method should be called after a branch resolves.
+      The execution stage requires both the PC of the current instruction and the predicted PC to resolve branches, so you need to store this information in a pipeline register or FIFO.</p>
+      <!-- %Since <tt>update</tt> takes in the PC for the current instruction, you will need to store the PC for the instruction that is currently in the execute stage of the pipeline.
+      %You will also need to use this PC in the <tt>Exec</tt> function so it can compute branch targets correctly (PC-4 will not work anymore to compute the PC of that instruction).-->
+
+    <p>The <tt>mispredict</tt> and <tt>addr</tt> fields of <tt>ExecInst</tt> will be very useful here.
+      It should be noted that the <tt>addr</tt> field is not always the correct PC of the next instruction &mdash; it will be addresses for memory loads and stores.
+      We can use high-level reasoning to conclude that loads and stores never get wrong next PC prediction, or we can check the instruction type to derive the next PC in the execute stage.</p>
+
+    <div class="exercise"><p><strong>Exercise 4 (10 Points):</strong>
+      In <tt>TwoStageBTB.bsv</tt>, add a BTB to your two-cycle pipelined RISC-V processor.
+      The BTB module is already instantiated in the given code.
+      Test this processor using the following command:</p>
+      <pre>$ make build.bluesim VPROC=TWOSTAGEBTB 
+$ ./run_asm.sh
+$ ./run_bmarks.sh</pre>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 3 (5 Points):</strong>
+      What is the IPC for the two-stage pipelined processor with a BTB for each benchmark tested by the <tt>run_bmarks.sh</tt> script?
+      How much has it improved over the previous version?</p>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 4 (5 Points):</strong>
+      How does adding the BTB change the performance of the <tt>bpred_*</tt> microbenchmarks?
+      (Hint: the number of cycles for <tt>bpred_j</tt> should go down.)</p>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 5 (Optional):</strong>
+      How long did it take you to complete this lab?</p>
+    </div>
+
+    <p>Remember to push your code with <tt>git push</tt> when you're done.</p>
+
+    <h3>Bonus Discussion Questions</h3>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 6 (5 Bonus Points):</strong>
+      Look at the assembly source for the <tt>bpred_*</tt> benchmarks and explain why each benchmark improved, stayed the same, or got worse.</p>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 7 (5 Bonus Points):</strong>
+      How would you improve the BTB to improve the results of <tt>bpred_bht</tt>?</p>
+    </div>
+
+        <div class="container">
+      <hr>
+      <footer class="footer">
+        <div class="container">
+          <p class="footer">&copy; 2016 <a href="http://web.mit.edu">Massachusetts Institute of Technology</a>. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="../js/jquery-3.1.0.min.js"></script>
+    <script src="../js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+/* many thanks to http://stackoverflow.com/questions/7717527/smooth-scrolling-when-clicking-an-anchor-link */
+$(document).on('click', 'a', function(event){
+    var href = $.attr(this, 'href');
+    var hash = href.indexOf("#");
+    var doc = location.pathname.substring(location.pathname.lastIndexOf("/") + 1);
+    console.log(doc);
+    if (hash !== -1 && href.substring(0, hash) === doc) {
+      event.preventDefault();
+      $('html, body').animate({
+          scrollTop: $( href.substring(hash) ).offset().top
+      }, 500);
+    }
+});
+    </script>
+
+
+  </body>
+</html>

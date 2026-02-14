@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="MIT 6.175 Fall 2016">
+    <meta name="author" content="Quan Nguyen">
+    <!-- <link rel="icon" href="favicon.ico"> -->
+
+    <title>MIT 6.175 - Constructive Computer Architecture | Lab 8: RISC-V Processor with Exceptions</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/6175.css" rel="stylesheet">
+
+  </head>
+
+  <body>
+
+        <!-- Static navbar -->
+    <nav class="navbar navbar-default navbar-static-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="../index.html">6.175</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+          <ul class="nav navbar-nav">
+            <li><a href="../index.html#schedule">Schedule</a></li>
+            <li class="active"><a href="../labs.html">Labs</a></li>
+            <li><a href="../course-info.html">Course Information</a></li>
+            <li><a href="../resources.html">Resources</a></li>
+            <li><a href="../contact.html">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+
+    <h1 id="page-header">Lab 8: RISC-V Processor with Exceptions</h1>
+
+    <div class="container content">
+      <div class="bg-warning">
+        <p><strong>Lab 8 due date:</strong> Monday, November 20, at 11:59:59 PM EST.</p>
+        <p>Your (exceptionally few) deliverables for Lab 8 are:</p>
+        <ul>
+          <li>Your answer to Exercise 1 in <tt>ExcepProc.bsv</tt>
+          <li>Your answer to Discussion Question 1 in <tt>discussion.txt</tt>
+        </ul>
+      </div>
+
+      <h2>Introduction</h2>
+      <p>In this lab you will add exceptions to a one-cycle RISC-V processor.
+      With the support of exception, we will be able to do the following two things:</p>
+      <ol>
+        <li>Implement <tt>printInt()</tt>, <tt>printChar()</tt>, and <tt>printStr()</tt> functions as system calls.</li>
+        <li>Emulate the unsupported multiply instruction (<tt>mul</tt>) in a software exception handler.</li>
+      </ol>
+      <p>We are using a one-cycle processor so you can focus on how exceptions work without including the complexities due to pipelining.</p>
+
+      <p>You have been given all the required programs for testing your processor.
+      You only need to add hardware support to run exceptions.
+      The following sections cover what has been changed in the processor and what you need to do.</p>
+
+      <h2>CSRs</h2>
+      <p>The <tt>mkCsrFile</tt> module in <tt>src/includes/CsrFile.bsv</tt> has been extended with new CSRs required for implementing exceptions.</p>
+
+      <p>Below is the summary of new CSRs in the <tt>mkCsrFile</tt> module.
+      Your software can manipulate these CSRs using the <tt>csrr</tt>, <tt>csrw</tt>, and <tt>csrrw</tt> instructions.
+
+      <table class="table lab5-listing">
+          <thead>
+            <tr><th>Control Register Name</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+          <tr><td style="width: 20%"><tt>mstatus</tt></td><td>
+            The low 12 bits of this register store a 4-element stack of privilege/user mode (PRV) and interrupt enable (IE) bits.
+            Each stack element is 3 bits wide.
+            For example, <tt>mstatus[2:0]</tt> corresponds to the top of the stack, and contains the current PRV and IE bits.
+            Specifically, <tt>mstatus[0]</tt> is the IE bit, and interrupts are enabled if IE = 1.
+            <tt>mstatus[2:1]</tt> contains the PRV bits.
+            If the processor is in user mode, it should be set to <tt>2'b00</tt>.
+            If the processor is in machine (privileged) mode, it should be set to <tt>2'b11</tt>.
+            Other stack elements (i.e. <tt>mstatus[5:3], ..., mstatus[11:9]</tt>) have the same construction.<br>
+            
+            When an exception is taken, the stack will be "pushed" by left-shifting 3 bits.
+            As a result, the new PRV and IE bits (e.g. machine mode and interrupt disabled) are now stored into <tt>mstatus[2:0]</tt>.<br>
+
+            Conversely, when we return from an exception using the <tt>eret</tt> instruction, the stack is "popped" by right-shifting 3 bits.
+            Bits <tt>mstatus[2:0]</tt> will contain their original values, and <tt>mstatus[11:9]</tt> is assigned to (user mode, interrupt enabled).</td></tr>
+
+          <tr><td><tt>mcause</tt></td><td>
+            When an exception occurs, the cause is stored in <tt>mcause</tt>.
+              <tt>ProcTypes.bsv</tt> contains two cause values for the exceptions that we will implement in this lab:
+              <ol>
+                <li><tt>excepUnsupport</tt>: an unsupported instruction exception.</li>
+                <li><tt>excepUserECall</tt>: a system call.</li>
+              </ol>
+          </td></tr>
+              
+          <tr><td><tt>mepc</tt></td><td>
+            When an exception occurs, the PC of the instruction causing the exception is stored in <tt>mepc</tt>.</td></tr>
+            
+        <tr><td><tt>mscratch</tt></td><td>
+          It stores the pointer to a "safe" data section that can be used to store all general purpose register (GPR) values when exception happens.
+          This register is completely manipulated by software in this lab.</td></tr>
+          
+        <tr><td><tt>mtvec</tt></td><td>
+          The <strong>t</strong>rap <strong>vec</strong>tor is a read-only register, and it stores the start address of the exception handler program.
+          The processor should set PC to <tt>mtvec</tt> when an exception happens.</td></tr>
+      </table>
+      <p>The <tt>mkCsrFile</tt> module also incorporates additional interface methods, which should be self-explanatory.</p>
+
+      <h2>Decode Logic</h2>
+      <p>The decoding logic has also been extended to support exceptions.
+      The functionality of the following three new instructions is summarized below:</p>
+
+      <table class="table lab5-listing">
+          <thead>
+            <tr><th>Instruction</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+          <tr><td style="width: 25%"><tt>eret</tt></td><td>
+              This instruction is used to return from exception handling.
+              It is decoded to a new <tt>iType</tt> of <tt>ERet</tt> and everything else invalid and not taken.</td></tr>
+          <tr><td><tt>ecall</tt> (or <tt>scall</tt>)</td><td>
+              This instruction is the system call instruction. 
+              It is decoded to a new <tt>iType</tt> of <tt>ECall</tt> and everything else invalid and not taken.</td></tr>
+          <tr><td><tt>csrrw rd, csr, rs1</tt></td><td>
+            This instruction writes the value of <tt>csr</tt> into <tt>rd</tt>, and writes the value of <tt>rs1</tt> into <tt>csr</tt>.
+            That is, it performs <tt>rd&nbsp;&lt;-&nbsp;csr; csr&nbsp;&lt;-&nbsp;rs1</tt>.
+            Both <tt>rd</tt> and <tt>rs1</tt> are GPRs, while <tt>csr</tt> is a CSR.
+            This instruction replaces the <tt>csrw</tt> instruction we have used before, because <tt>csrw</tt> is just a special case of <tt>csrrw</tt>.
+            This instruction is decoded to a new <tt>iType</tt> of <tt>Csrrw</tt>.<br>
+            Since <tt>csrrw</tt> will write two registers, the <tt>ExecInst</tt> type in <tt>ProcTypes.bsv</tt> incorporates a new field "<tt>Data csrData</tt>", which contains the data to be written into <tt>csr</tt>.</td></tr>
+          </tbody>
+      </table>
+
+      <p>The <tt>eret</tt> and <tt>csrrw</tt> instructions are allowed in machine (privileged) mode.
+      To detect the illegal use of such instructions in user mode, the <tt>decode</tt> function in <tt>Decode.bsv</tt> takes a second argument "<tt>Bool inUserMode</tt>".
+      This argument should be set to <tt>True</tt> if the processor is in user mode.
+      If the decode function detects the illegal use of <tt>eret</tt> and <tt>csrrw</tt> instructions in user mode, the <tt>iType</tt> of the instruction will be set to a new value <tt>NoPermission</tt>, and the processor will report this error later.</p>
+
+      <h2>Processor</h2>
+      <p>We have provided most of the processor code in <tt>ExcepProc.bsv</tt>, and you only need to fill out four places marked with the "<tt>TODO</tt>" comments:</p>
+      <ol>
+        <li>A second argument for <tt>decode</tt> function.</li>
+        <li>Handle "unsupported instruction" exceptions: set <tt>mepc</tt> and <tt>mcause</tt>, push the new PRV and IE bits into the stack of <tt>mstatus</tt>, and chage PC to <tt>mtvec</tt>. 
+        You may want to use the <tt>startExcep</tt> method of <tt>mkCsrFile</tt>.</li>
+        <li>Handle system calls: system calls can be handled like an unsupported instruction exception.</li>
+        <li>Handle the <tt>eret</tt> instruction: pop the stack of <tt>mstatus</tt> and change PC to <tt>mepc</tt>.
+        You may want to use the <tt>eret</tt> method of <tt>mkCsrFile</tt>.</li>
+      </ol>
+
+      <h2>Test Programs</h2>
+      <p>The test programs can be grouped into three classes: the assembly tests and benchmarks, which we have seen before, and a new group of programs that test your processor's exception-handling facilities.</p>
+
+      <h3>Old Programs</h3>
+      <p>The assembly tests and benchmarks run in machine mode (these are said to "run bare-metal") and will not trigger exceptions.
+      They can be compiled by going to <tt>programs/assembly</tt> and <tt>programs/benchmarks</tt> folders and running <tt>make</tt>.</p>
+
+      <h3>New Programs</h3>
+      <p>The third class of programs deal with exceptions.
+      These programs start in machine mode but immediately drop to user mode.
+      All print functions are implemented as system calls, and the unsupported multiply instruction (<tt>mul</tt>) can be emulated in the software exception handler.
+      The source for these programs also reside under the <tt>programs/benchmarks</tt> folder, but they are linked to libraries in the <tt>programs/benchmarks/excep_common</tt> folder (instead of <tt>programs/benchmarks/common</tt>).</p>
+
+      <p>To compile these programs, you can use the following commands:</p>
+      <pre>$ cd programs/benchmarks
+$ make -f Makefile.excep</pre>
+      <p>The compilation results will appear in the <tt>programs/build/excep</tt> folder.
+      (If you forget, you'll get an error like "ERROR: ../../programs/build/excep/vmh/median.riscv.vmh does not exit [sic], you need to first compile".)</p>
+
+      <p>These programs not only include the original benchmarks we have seen before, but also include two new programs:</p>
+      <ul>
+        <li><tt>mul_inst</tt>: This is an alternative version of the original <tt>multiply</tt> benchmark, which directly uses the <tt>mul</tt> instruction.</li>
+        <li><tt>permission</tt>: This program executes the <tt>csrrw</tt> instruction in user mode, and should <em>fail</em>!</li>
+      </ul>
+
+      <h2>Implementing Exceptions</h2>
+      <div class="exercise"><p><strong>Exercise 1 (40 Points):</strong>
+        Implement exceptions as described above on the processor in <tt>ExcepProc.bsv</tt>.
+        You can build the processor by running</p>
+        <pre>make build.bluesim VPROC=EXCEP</pre>
+        </p>.
+        We have provided the following scripts to run the test programs in simulation:</p>
+
+        <ol>
+          <li><tt>run_asm.sh</tt>: run assembly tests in machine mode (without exceptions).</li>
+          <li><tt>run_bmarks.sh</tt>: run benchmarks in machine mode (without exceptions).</li>
+          <li><tt>run_excep.sh</tt>: run benchmarks in user mode (with exceptions).</li>
+          <li><tt>run_permit.sh</tt>: run the <tt>permission</tt> program in user mode.</li>
+        </ol>
+
+        <p>Your processor should pass all the tests in the first three scripts (<tt>run_asm.sh</tt>, <tt>run_bmarks.sh</tt>, and <tt>run_excep.sh</tt>), but should report an error and terminate on the last script (<tt>run_permit.sh</tt>).
+        Note that after you see the error message outputted when running <tt>run_permit.sh</tt>, the testbench is still running, so you may need to hit <tt>Ctrl-C</tt> to terminate it.</p>
+      </div>
+
+      <div class="exercise discussion"><p><strong>Discussion Question 1 (10 Points):</strong>
+      In the spirit of the upcoming Thanksgiving holiday, list some reasons you are thankful you only have to do this lab on a one-cycle processor.
+      To get you started: what new hazards would exceptions introduce if you were working on a pipelined implementation?</p>
+      </div>
+
+      <div class="exercise discussion"><p><strong>Discussion Question 2 (Optional):</strong>
+        How long did it take for you to finish this lab?</p>
+      </div>
+
+      <p>Remember to commit your code and <tt>git push</tt> when you're done.</p>
+
+    </div>
+
+        <div class="container">
+      <hr>
+      <footer class="footer">
+        <div class="container">
+          <p class="footer">&copy; 2016 <a href="http://web.mit.edu">Massachusetts Institute of Technology</a>. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="../js/jquery-3.1.0.min.js"></script>
+    <script src="../js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+/* many thanks to http://stackoverflow.com/questions/7717527/smooth-scrolling-when-clicking-an-anchor-link */
+$(document).on('click', 'a', function(event){
+    var href = $.attr(this, 'href');
+    var hash = href.indexOf("#");
+    var doc = location.pathname.substring(location.pathname.lastIndexOf("/") + 1);
+    console.log(doc);
+    if (hash !== -1 && href.substring(0, hash) === doc) {
+      event.preventDefault();
+      $('html, body').animate({
+          scrollTop: $( href.substring(hash) ).offset().top
+      }, 500);
+    }
+});
+    </script>
+
+
+  </body>
+</html>

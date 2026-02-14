@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="MIT 6.175 Fall 2017">
+    <meta name="author" content="Quan Nguyen">
+    <!-- <link rel="icon" href="favicon.ico"> -->
+
+    <title>MIT 6.175 - Constructive Computer Architecture | Lab 7: RISC-V Processor and Caches</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/6175.css" rel="stylesheet">
+
+    <link rel="stylesheet" href="../css/highlight-default.css">
+    <link href="https://fonts.googleapis.com/css?family=Inconsolata" rel="stylesheet"> 
+    <script src="../js/highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <style type="text/css">
+/* remove pre styling */
+pre {
+  border: none;
+  border-radius: 0pt;
+  font-family: "Inconsolata", monospace;
+  font-size: 11pt;
+}
+
+code {
+  font-family: "Inconsolata", monospace;
+  font-size: 11pt;
+}
+
+tt {
+  font-family: "Inconsolata", monospace;
+}
+    </style>
+  </head>
+
+  <body>
+
+        <!-- Static navbar -->
+    <nav class="navbar navbar-default navbar-static-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="../index.html">6.175</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+          <ul class="nav navbar-nav">
+            <li><a href="../index.html#schedule">Schedule</a></li>
+            <li class="active"><a href="../labs.html">Labs</a></li>
+            <li><a href="../course-info.html">Course Information</a></li>
+            <li><a href="../resources.html">Resources</a></li>
+            <li><a href="../contact.html">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+
+    <h1 id="page-header">Lab 7: RISC-V Processor with DRAM and Caches</h1>
+
+    <div class="container content">
+      <div class="bg-warning">
+        <p><strong>Lab 7 due date:</strong> November, Friday 10 , 2017, at 11:59:59 PM EST.</p>
+        <p>Your deliverables for Lab 7 are:</p>
+        <ul>
+          <li>your answers to Exercises 1 and 2 in <tt>WithoutCache.bsv</tt> and <tt>WithCache.bsv</tt></li>
+          <li>your answers to Discussion Questions 1 and 2 in <tt>discussion.txt</tt></li>
+        </ul>
+      </div>
+
+    <h2>Introduction</h2>
+    <p>Now, you have a 6-stage pipelined RISC-V processor with branch target and direction predictors (a BTB and a BHT).
+    Unfortunately, your processor is limited to running programs that can fit in fast and small memory (In BRAM).
+    This works fine for the small benchmark programs we are running, such as a 250-item quicksort, but most interesting applications are (much) larger than the currently 256&nbsp;KB.
+    In this lab we will see how to plug a bigger but slower memory (that has a slightly different interface), and then we will cache the accesses to the slow memory with the fast small memory. 
+
+    Indeed, big memory (DDR) is great for storing large programs, but this may hurt the performance since DRAM has comparatively long read latencies.</p>
+
+    <p>This lab will focus on using DRAM instead of block RAM for main program and data storage to store larger programs and adding caches to reduce the performance penalty from long-latency DRAM loads.</p>
+
+    <p>First, you will write a translator module that translates CPU memory requests into DRAM requests.
+    This module vastly expands your program storage space, but your program will run much more slowly because you read from DRAM in almost every cycle.
+    <!-- This module will enable a larger storage space for your programs, but it will see a large decrease in performance since your are reading from DRAM almost every cycle.-->
+    Next, you will implement a cache to reduce the amount of times you need to read from the DRAM, therefore improving your processors performance.
+    </p>
+
+<!--    <h2>Change in Testing Infrastructure</h2>
+
+    <p>It would take a long time to run all the assembly tests if we had to reconfigure the FPGA every time (reconfiguring the FPGA takes about a minute).
+    Since we're not changing the hardware, we'll only configure the FPGA once, and then perform a <em>soft reset</em> each time we want to run a new test.
+    The software test bench (located in <tt>scemi/Tb.cpp</tt>) will initiate soft resets, write the <tt>*.vmh</tt> file of successive test programs to your FPGA's DRAM, and start new tests.
+    Before starting each test, the software test bench will also print out the name of your benchmark, to aid in debugging.
+    In software simulation (without the FPGA), we will also simulate the process of writing <tt>*.vmh</tt> files to DRAM, so simulation time will be longer than before, too.</p>
+
+    <p>Below are example commands to simulate a processor named <tt>withoutcache</tt>, which we will build in Exercise 1 of this lab, using assembly tests <tt>simple.S</tt> and <tt>add.S</tt>:
+    <pre>$ cd scemi/sim
+$ ./withoutcache_dut &gt; log.txt &amp;
+$ ./tb ../../programs/build/assembly/vmh/simple.riscv.vmh ../../programs/build/assembly/vmh/add.riscv.vmh </pre>
+
+    <p>Here are the sample outputs:</p>
+<pre>
+---- ../../programs/build/assembly/vmh/simple.riscv.vmh ----
+1196
+103
+PASSED
+
+---- ../../programs/build/assembly/vmh/add.riscv.vmh ----
+5635
+427
+PASSED
+
+SceMi Service thread finished!</pre>
+
+    <p>We also provide two scripts <tt>run_asm.sh</tt> and <tt>run_bmarks.sh</tt> to run all assembly tests and benchmarks respectively.
+    For example, we can use the following commands to test processor <tt>withoutcache</tt>:</p>
+    <pre>$ ./run_asm.sh withoutcache
+$ ./run_bmarks.sh withoutcache</pre>
+
+    <p>The standard outputs of BSV will be redirected to <tt>asm.log</tt> and <tt>bmarks.log</tt> respectively.</p>
+
+-->
+    <h2>DRAM Interface</h2>
+    <p>
+    DDR3 memory has a 64-bit wide data bus, but eight 64-bit chunks are sent per transfer, so effectively it acts like a 512-bit-wide memory.
+    DDR3 memories have high throughput, but they also have high latencies for reads.</p>
+
+    <p>We give you a DDR3 memory controller, we can connect to it through the <tt>MemoryClient</tt> interface.
+    The typedefs provided for you in this lab use types from BSV's Memory package (see BSV reference guide or source code at <tt>$BLUESPECDIR/BSVSource/Misc/Memory.bsv</tt>).
+    Here are some of the typedefs related to DDR3 memory in <tt>src/includes/MemTypes.bsv</tt>:</p>
+    <pre><code class="bsv">typedef 24 DDR3AddrSize;
+typedef Bit#(DDR3AddrSize) DDR3Addr;
+typedef 512 DDR3DataSize;
+typedef Bit#(DDR3DataSize) DDR3Data;
+typedef TDiv#(DDR3DataSize, 8) DDR3DataBytes;
+typedef Bit#(DDR3DataBytes) DDR3ByteEn;
+typedef TDiv#(DDR3DataSize, DataSize) DDR3DataWords;
+
+// The below typedef is equivalent to this:
+// typedef struct {
+//     Bool        write;
+//     Bit#(64)    byteen;
+//     Bit#(24)    address;
+//     Bit#(512)   data;
+// } DDR3_Req deriving (Bits, Eq);
+typedef MemoryRequest#(DDR3AddrSize, DDR3DataSize) DDR3_Req;
+
+// The below typedef is equivalent to this:
+// typedef struct {
+//     Bit#(512)   data;
+// } DDR3_Resp deriving (Bits, Eq);
+typedef MemoryResponse#(DDR3DataSize) DDR3_Resp;
+
+// The below typedef is equivalent to this:
+// interface DDR3_Client;
+//     interface Get#( DDR3_Req )  request;
+//     interface Put#( DDR3_Resp ) response;
+// endinterface;
+typedef MemoryClient#(DDR3AddrSize, DDR3DataSize) DDR3_Client;</code></pre>
+
+    <h3><tt>DDR3_Req</tt></h3>
+    <p>The requests for DDR3 reads and writes are different than requests for <tt>FPGAMemory</tt>.
+    The biggest difference is the byte enable signal, <tt>byteen</tt>.</p>
+    <ul>
+      <li><tt>write</tt> -- Boolean specifying if this request is a write request or a read request.</li>
+      <li><tt>byteen</tt> -- Byte enable, specifies which 8-bit bytes will be written.
+	    This field has no effect for a read request.
+        If you want to write all 16 bytes (i.e. 512 bits), you will need to set this to all 1's.
+        You can do that with the literal <tt>'1</tt> (note the apostrophe) or <tt>maxBound</tt>.</li>
+      <li><tt>address</tt> -- Address for read or write request.
+        DDR3 memory is addressed in 512-bit chunks, so address 0 refers to the first block of 512 bits, and address 1 refers to the second block of 512 bits.
+        This is very different than the byte addressing used in the RISC-V processor.</li>
+      <li><tt>data</tt> -- Data value used for write requests.</li>
+    </ul>
+
+    <h3><tt>DDR3_Resp</tt></h3>
+    <p>DDR3 memory only sends responses for reads, just like <tt>FPGAMemory</tt>.
+    The memory response type is a structure -- so instead of directly receiving a <tt>Bit#(512)</tt> value, you will have to access the <tt>data</tt> field of the response in order to get the <tt>Bit#(512)</tt> value.</p>
+
+<!--    <h3><tt>DDR3_Client</tt></h3>
+    <p>The <tt>DDR3_Client</tt> interface is made up of a <tt>Get</tt> subinterface and a <tt>Put</tt> subinterface.
+    This interface is exposed by the processor, and the Sce-Mi infrastructure connects it to the DDR3 controller.
+    You do not need to worry about constructing this interface because it is done for you in the example code.</p>
+-->
+    <h3>Example Code</h3>
+    <p>Here is some example code showing how to construct the FIFOs for a DDR3 memory interface along with the initialization interface for DDR3.
+    This example code is provided in <tt>src/DDR3Example.bsv</tt>.</p>
+    <pre><code class="bsv">import GetPut::*;
+import ClientServer::*;
+import Memory::*;
+import CacheTypes::*;
+import WideMemInit::*;
+import MemUtil::*;
+import Vector::*;
+
+// other packages and type definitions
+
+(* synthesize *)
+module mkProc#(Fifo#(2,DDR3_Req) ddr3ReqFifo, Fifo#(2,DDR3_Resp) ddr3RespFifo)(Proc);
+// Those two fifos are the interface with the real DRAM
+	Ehr#(2, Addr)  pcReg &lt;- mkEhr(?);
+	CsrFile         csrf &lt;- mkCsrFile;
+	// other processor stats and components
+	//...
+	
+	// wrap DDR3 to WideMem interface
+	WideMem           wideMemWrapper &lt;- mkWideMemFromDDR3( ddr3ReqFifo, ddr3RespFifo );
+	// split WideMem interface to two (use it in a multiplexed way) 
+	// This spliter only take action after reset (i.e. memReady &amp;&amp; csrf.started)
+	// otherwise the guard may fail, and we get garbage DDR3 resp
+	Vector#(2, WideMem)     wideMems &lt;- mkSplitWideMem( memReady &amp;&amp; csrf.started, wideMemWrapper );
+	// Instruction cache should use wideMems[1]
+	// Data cache should use wideMems[0]
+	
+	// some garbage may get into ddr3RespFifo during soft reset
+	// this rule drains all such garbage
+	rule drainMemResponses( !csrf.started );
+		ddr3RespFifo.deq;
+	endrule
+	
+	// other rules
+	
+	method ActionValue#(CpuToHostData) cpuToHost if(csrf.started);
+		let ret &lt;- csrf.cpuToHost;
+		return ret;
+	endmethod
+	
+	// add ddr3RespFifo empty into guard, make sure that garbage has been drained
+	method Action hostToCpu(Bit#(32) startpc) if ( !csrf.started &amp;&amp; memReady &amp;&amp; !ddr3RespFifo.notEmpty );
+		csrf.start(0); // only 1 core, id = 0
+		pcReg[0] &lt;= startpc;
+	endmethod
+	
+endmodule</code></pre>
+
+    <p>In the above example code, <tt>ddr3ReqFifo</tt> and <tt>ddr3RespFifo</tt> serve as interfaces to the real DDR3 DRAM. 
+    In simulation, those fifos are hooked up to a module a module called <tt>mkSimMem</tt> to simulate the DRAM, which we are instantiating and you don't have to worry about.</p>
+    <p>In the example code, we use module <tt>mkWideMemFromDDR3</tt> to translate <tt>DDR3_Req</tt> and <tt>DDR3_Resp</tt> types to a more friendly <tt>WideMem</tt> interface defined in <tt>src/includes/CacheTypes.bsv</tt>.</p>
+
+    <h3>Sharing the DRAM Interface</h3>
+    <p>The example code exposes a single interface with the DRAM, but you have two modules that will be using it: an instruction cache and a data cache.
+    If they both send requests to <tt>ddr3ReqFifo</tt> and they both get responses from <tt>ddr3RespFifo</tt>, it is possible for their responses to get mixed up.
+    To handle this, you need a separate FIFO to keep track of the order the responses should come back in.
+    Each load request is paired with an enqueue into the ordering FIFO that says who should get the response.</p>
+
+    <p>To simplify this for you, we have provided module <tt>mkSplitWideMem</tt> to split the DDR3 FIFOs into two <tt>WideMem</tt> interfaces.
+    This module is defined in <tt>src/includes/MemUtils.bsv</tt>.
+    To prevent <tt>mkSplitWideMem</tt> from taking action to early and exhibiting unexpected behavior, we set its first parameter to <tt>memReady &amp;&amp; csrf.started</tt> to freeze it before the processor is started.
+    This also avoids scheduling conflicts with initialization of DRAM contents.</p>
+
+  <!--  <h3>Handling Problems in Soft Reset</h3>
+    <p>As mentioned before, you will perform a soft reset of the processor states before starting each new test.
+    During soft reset, some garbage data may be enqueued into <tt>ddr3RespFifo</tt> due to some cross clock domain issues.
+    To handle this problem, we have added a <tt>drainMemResponses</tt> rule to drain the garbage data, and have added a condition that checks whether <tt>drainMemResponses</tt> is empty into the guard of method <tt>hostToCpu</tt>.</p>
+	  <p class="bg-info"><strong>Suggestion:</strong> add <tt>csrf.started</tt> to the guard of the rule for each pipeline stage. This prevents the pipeline from accessing DRAM before the processor is started.</p>
+-->
+    <h2>Migrating Code from Previous Lab</h2>
+    <p>The provided code for this lab is very similar, but there are a few differences to note.
+    Most of the differences are displayed in the provided example code <tt>src/DDR3Example.bsv</tt>.</p>
+
+    <h3>Modified Proc Interface</h3>
+    <p>The Proc interface now does not have any initialization interface. The initialization of the DRAM is done outside and you do not need to worry about it.
+    </p>
+
+    <h3>Empty Files</h3>
+    <p>The two processor implementations for this lab: <tt>src/WithoutCache.bsv</tt> and <tt>src/WithCache.bsv</tt> are initially empty.
+    You should copy over the code from either <tt>SixStageBHT.bsv</tt> or <tt>SixStageBonus.bsv</tt> as a starting point for these processors.
+    <tt>src/includes/Bht.bsv</tt> is also empty, so you will have to copy over the code from the previous lab for that too.</p>
+
+    <h3>New Files</h3>
+    <p>Here is the summary of new files provided under the <tt>src/includes</tt> folder:
+    <table class="table lab5-listing">
+      <thead>
+        <tr><th>Filename</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><tt>Cache.bsv</tt></td><td>An empty file in which you will implement cache modules in this lab.</td></tr>
+        <tr><td><tt>CacheTypes.bsv</tt></td><td>A collection of type and interface definitions about caches.</td></tr>
+        <tr><td><tt>MemUtil.bsv</tt></td><td>A collection of useful modules and functions about DDR3 and <tt>WideMem</tt>.</td></tr>
+        <tr><td><tt>SimMem.bsv</tt></td><td>DDR3 memory used in simulation.
+        It has a 10-cycle pipelined access latency, but extra glue logic may add more to the total delay of accessing DRAM in simulation.</td></tr>
+        <tr><td><tt>WideMemInit.bsv</tt></td><td>Module to initialize DDR3.</td></tr>
+      </tbody>
+    </table>
+
+    <p>There are also changes in <tt>MemTypes.bsv</tt>.</p>
+
+    <h2><tt>WithoutCache.bsv</tt> -- Using the DRAM Without a Cache</h2>
+    <div class="exercise"><p><strong>Exercise 1 (10 Points):</strong>
+      Implement a module <tt>mkTranslator</tt> in <tt>Cache.bsv</tt> that takes in some interface related to DDR3 memory (<tt>WideMem</tt> for example) and returns a <tt>Cache</tt> interface (see <tt>CacheTypes.bsv</tt>).</p>
+
+      <p>This module should not do any caching, just translation from <tt>MemReq</tt> to requests to DDR3 (<tt>WideMemReq</tt> if using <tt>WideMem</tt> interfaces) and translation from responses from DDR3 (<tt>CacheLine</tt> if using <tt>WideMem</tt> interfaces) to <tt>MemResp</tt>.
+      This will require some internal storage to keep track of which word you want from the cache line that comes back from main memory.
+      Integrate <tt>mkTranslator</tt> into a six stage pipeline in the file <tt>WithoutCache.bsv</tt> (i.e. you should no longer use <tt>mkFPGAMemory</tt> here).
+      You can build this processor by running</p>
+      <pre>$ make build.bluesim VPROC=WITHOUTCACHE</pre>
+      <p>and you can test this processor by running</p>
+      <pre>$ ./run_asm.sh</pre>
+      <p>and</p>
+      <pre>$ ./run_bmarks.sh</pre> 
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 1 (5 Points):</strong>
+      Record the results for <tt>./run_bmarks.sh withoutcache</tt>.
+      What IPC do you see for each benchmark?</p>
+    </div>
+
+    <h2><tt>WithCache.bsv</tt> -- Using the DRAM With a Cache</h2>
+    <p>By running the benchmarks with simulated DRAM, you should have noticed that your processor slows down a lot.
+    You can speed up your processor again by remembering previous DRAM loads in a cache as described in class.</p>
+
+    <div class="exercise"><p><strong>Exercise 2 (20 Points):</strong>
+      Implement a module <tt>mkCache</tt> to be a direct mapped cache that allocates on write misses and writes back only when a cache line is replaced.</p>
+
+      <p>This module should take in a <tt>WideMem</tt> interface (or something similar) and expose a <tt>Cache</tt> interface.
+      Use the <tt>typedefs</tt> in <tt>CacheTypes.bsv</tt> to size your cache and for the <tt>Cache</tt> interface definition.
+      You can use either vectors of registers or register files to implement the arrays in the cache, but vectors of registers are easier to specify initial values.
+      Incorporate this cache in the same pipeline from <tt>WithoutCache.bsv</tt> and save it in <tt>WithCache.bsv</tt>.
+      You can build this processor by running</p>
+      <pre>$ make build.bluesim VPROC=WITHCACHE</pre>
+      <p>and you can test this processor by running</p>
+      <pre>$ ./run_asm.sh</pre>
+      <p>and</p>
+      <pre>$ ./run_bmarks.sh</pre>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 2 (5 Points):</strong>
+      Record the results for <tt>./run_bmarks.sh withcache</tt>.
+      What IPC do you see for each benchmark?</p>
+    </div>
+
+    <h2>Running Large Programs</h2>
+    <p>By adding support for DDR3 memory, your processor can now run larger programs than the small benchmarks we have been using.
+    Unfortunately, these larger programs take longer to run, and in many cases, it will take too long for simulation to finish.
+    Now is a great time to try FPGA synthesis.
+    By implementing your processor on an FPGA, you will be able to run these large programs much faster since the design is running in hardware instead of software.</p>
+
+    <div class="exercise"><p><strong>Exercise 3 (0 Points, but you should still totally do this):</strong>
+      Before synthesizing for an FPGA, let's try looking at a program that takes a long time to run in simulation.
+      The program <tt>./run_mandelbrot.sh</tt> runs a benchmark that prints a square image of the Mandelbrot set using 1's and 0's.
+      Run this benchmark to see how slow it runs in real time.
+      Please don't wait for this benchmark to finish, just kill it early using Ctrl-C.</p>
+    </div>
+<!--
+    <h3>Synthesizing for FPGA</h3>
+    <p>You can start FPGA synthesis for <tt>WithCache.bsv</tt> by going into the <tt>scemi/fpga_vc707</tt> folder and executing the command:</p>
+    <pre>$ vivado_setup build -v</pre>
+
+    <p>This command will take a lot of time (about one hour) and a lot of computation resources.
+    You will probably want to select a vlsifarm server that is under a light load.
+    You can see how many people are logged in with <tt>w</tt> and you can see the resources being used with <tt>top</tt> or <tt>uptime</tt>.</p>
+
+    <p>Once this has completed, you can submit your FPGA design for testing on the shared FPGA board by running the command <tt>./submit_bitfile</tt> and you can then check the results with <tt>./get_results</tt>.
+    The <tt>get_results</tt> script will keep displaying the current FPGA status before your result is ready.
+    It may take a few minutes to perform a run on FPGA, and it may take longer if other students have also submitted jobs.
+    The <tt>*.vmh</tt> program files for the FPGA reside in <tt>/mit/6.175/fpga-programs</tt>. 
+    It includes all the programs used in simulation, as well as the benchmark programs with larger inputs (in the <tt>large</tt> subdirectory).
+    You can also generate the <tt>*.vmh</tt> files for large benchmarks by doing <tt>make -f Makefile.large</tt> in <tt>programs/benchmarks</tt> folder.
+    However, these <tt>*.vmh</tt> files will take too long to simulate in software.</p>
+
+    <p>If you want to check the status of the FPGA, you can run the command <tt>./fpga_status</tt>.</p>
+
+    <div class="exercise"><p><strong>Exercise 4 (10 Points):</strong>
+      Synthesize <tt>WithCache.bsv</tt> for the FPGA and send your design to the shared FPGA for execution.
+      Get the results for the normal and large benchmarks and add them to <tt>discussion.txt</tt>.</p>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 3 (10 Points):</strong>
+      How many cycles does the Mandelbrot program take to execute in your processor?
+      The current FPGA design has an effective clock speed of 50 MHz.
+      How long does the Mandelbrot program take to execute in seconds?
+      Estimate how much of a speedup you are seeing in hardware versus simulation by estimating how long (in wall clock time) it would take to run <tt>./run_mandelbrot.sh</tt> in simulation.</p>
+    </div>
+
+    <div class="exercise discussion"><p><strong>Discussion Question 4 (Optional):</strong>
+      How long did it take for you to finish this lab?</p>
+    </div>
+
+    <p>Remember to commit your code and <tt>git push</tt> when you're done.</p>
+
+    <p class="bg-info"><strong>A note from your friendly TA:</strong> If you have any problems with the FPGA test, please e-mail me as soon as possible.
+    The infrastructure is not very stable, but notifying me early about any problems will get them resolved sooner.</p>
+
+    <p class="bg-info"><strong>Something to check out: (added November 17)</strong> 
+    Let's analyze some of the results from FPGA synthesis.<br><br>
+
+    Look at <tt>scemi/fpga_vc707/xilinx/mkBridge/mkBridge.runs/synth_1/runme.log</tt>, and search for "Report Instance Areas".
+    This report shows a breakdown of the number of cells used by your design.
+    How many are used by <tt>scemi_dut_dut_dutIfc_m_dut</tt>?
+    How many are there total? (See <tt>top</tt>.)<br><br>
+
+    Take a look at <tt>scemi/fpga_vc707/xilinx/mkBridge/mkBridge.runs/impl_1/mkBridge_utilization_placed.rpt</tt>.
+    This contains a report of your design's utilization of the FPGA resources (which are organized as "slices", and are different from cells).
+    Under "1. Slice Logic", you can see how many slices your whole design (including memory controllers and Sce-Mi interface) used.
+
+    Now look at <tt>scemi/fpga_vc707/xilinx/mkBridge/mkBridge.runs/impl_1/mkBridge_timing_summary_routed.rpt</tt>.
+    This has some timing information, and most importantly, the delay of your longest combinational path in your CPU.
+    Look for the appearance of "<tt>scemi_dut_dut_dutIfc_m_dut/[signal]</tt>" in sections labeled "Max Delay Paths".
+    "Slack" is the difference between the "required time" (essentially the clock period) and the "arrival time" (the time it takes for your signals to propagate through this part of your design).
+    What do you see in the path (see the "Netlist Resource(s)" column)?
+    Why might we see EHRs in a maximum delay path (i.e., critical path)?</p>
+-->
+
+<p> Now we are all ready to try FPGA build and stuff. To be continued. </p>
+        <div class="container">
+      <hr>
+      <footer class="footer">
+        <div class="container">
+          <p class="footer">&copy; 2016 <a href="http://web.mit.edu">Massachusetts Institute of Technology</a>. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="../js/jquery-3.1.0.min.js"></script>
+    <script src="../js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+/* many thanks to http://stackoverflow.com/questions/7717527/smooth-scrolling-when-clicking-an-anchor-link */
+$(document).on('click', 'a', function(event){
+    var href = $.attr(this, 'href');
+    var hash = href.indexOf("#");
+    var doc = location.pathname.substring(location.pathname.lastIndexOf("/") + 1);
+    console.log(doc);
+    if (hash !== -1 && href.substring(0, hash) === doc) {
+      event.preventDefault();
+      $('html, body').animate({
+          scrollTop: $( href.substring(hash) ).offset().top
+      }, 500);
+    }
+});
+    </script>
+
+
+  </body>
+</html>

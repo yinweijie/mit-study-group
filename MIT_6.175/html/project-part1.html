@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <meta name="description" content="MIT 6.175 Fall 2016">
+    <meta name="author" content="Quan Nguyen">
+    <!-- <link rel="icon" href="favicon.ico"> -->
+
+    <title>MIT 6.175 - Constructive Computer Architecture | Project Part 2: Cache Coherence</title>
+
+    <!-- Bootstrap core CSS -->
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/6175.css" rel="stylesheet">
+
+    <link rel="stylesheet" href="../css/highlight-default.css">
+    <script src="../js/highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <style type="text/css">
+/* remove pre styling */
+pre {
+  border: none;
+  border-radius: 0pt;
+  font-family: "Inconsolata", monospace;
+  font-size: 11pt;
+}
+
+code {
+  font-family: "Inconsolata", monospace;
+  font-size: 11pt;
+}
+
+tt {
+  font-family: "Inconsolata", monospace;
+}
+
+pre.cmdline {
+  background-color: #444;
+  color: white;
+}
+    </style>
+
+  </head>
+
+  <body>
+
+        <!-- Static navbar -->
+    <nav class="navbar navbar-default navbar-static-top">
+      <div class="container">
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand" href="../index.html">6.175</a>
+        </div>
+        <div id="navbar" class="navbar-collapse collapse">
+          <ul class="nav navbar-nav">
+            <li><a href="../index.html#schedule">Schedule</a></li>
+            <li class="active"><a href="../labs.html">Labs</a></li>
+            <li><a href="../course-info.html">Course Information</a></li>
+            <li><a href="../resources.html">Resources</a></li>
+            <li><a href="../contact.html">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+
+    <h1 id="page-header">Project: Cache Coherence</h1>
+
+    <div class="container content">
+      <div class="bg-warning">
+        <p>The project will be due at project presentations to be held <strong>Wednesday, December 13, at 3 PM EST</strong>.</p>
+      </div>
+
+
+      <h2>Overview</h2>
+      <p>In this part of the project, we will implement a multicore system like the one shown in Figure&nbsp;1 in simulation.
+      The system consists of two cores (for developement, but should be
+parametrized to be compilable with 4 cores), and each core has its own private
+caches.  The data caches (D caches) and main memory are kept coherent using the
+MSI protocol introduced in class.  Since we don't have self-modifying programs,
+the instruction caches (I caches) can directly access the memory without going
+through any coherent transactions.</p>
+
+      <table class="figures">
+        <tr class="imgs">
+          <td style="height: 3in"><img style="height: 3in" src="proj2/system.png" alt="Multicore system architecture"></td>
+        </tr>
+        <tr>
+          <td>Figure 1: Multicore system</td>
+        </tr>
+      </table>
+
+      <p>Since this system is quite complex, we have tried to divide the implementation into multiple small steps, and we have provided testbenches for each step.
+      However, passing the testbenches <strong>does not</strong> imply that the implementation is 100% correct.</p>
+
+      <h2>Infrastructure</h2> 
+<p>In this project you are working with someone
+else. The first thing to do for your group is to set up the infrastructure: one
+of you should create an MIT github repository that is a fork of this <a href="https://github.mit.edu/bthom/project6175">repository</a>.
+ The two of you should have commit rights to this new repo.  Let me
+know by email/piazza if your group need help for that. If one of you know how
+to do that, but not the other one, it is a great day to do a transfer of
+knowledge and teach the other one!</p>
+   
+      <p>You should then give me read rights (and write rights if you want), to this repo (for me to be able to grade it, or help you if you need help).
+      But it should not be entirely public (to avoid the other groups looking at it).</p>
+      <p>A good rule to work in group is to always push what you are working on, and to always pull before starting working on anything and to never keep things locally for too long.
+         This should avoid the majority of merge conflict problems. 
+      You should also avoid changing everything overnight without telling the other one.</p>
+
+      <h2>Implementing units of the memory hierarchy</h2>
+
+      <h3>Message FIFO</h3>
+      <p>The message FIFO transfers both request and response messages.
+      For a message FIFO from a child to the parent, it transfers upgrade requests and downgrade responses.
+      For a message FIFO from the parent to a child, it transfers downgrade requests and upgrade responses.</p>
+
+      <p>The message types transferred by the message FIFO is defined in <tt>src/includes/CacheTypes.bsv</tt> as follow:</p>
+      <pre><code class="bsv">typedef struct {
+  CoreID            child;
+  Addr              addr;
+  MSI               state;
+  Maybe#(CacheLine) data;
+} CacheMemResp deriving(Eq, Bits, FShow);
+
+typedef struct {
+  CoreID      child;
+  Addr        addr;
+  MSI         state;
+} CacheMemReq deriving(Eq, Bits, FShow);
+
+typedef union tagged {
+  CacheMemReq     Req;
+  CacheMemResp    Resp;
+} CacheMemMessage deriving(Eq, Bits, FShow);</code></pre>
+
+      <p><tt>CacheMemResp</tt> is the type for both downgrade responses from a child to the parent, and upgrade responses from the parent to a child.
+      The first field <tt>child</tt> is the ID of the D cache involved in the message passing.
+      The type <tt>CoreID</tt> is defined in <tt>Types.bsv</tt>.
+      The third field <tt>state</tt> is the MSI state that the child has downgraded to for a downgrade response, or the MSI state that the child will be able to upgrade to for a upgrade response.</p>
+
+      <p><tt>CacheMemReq</tt> is the type for both upgrade requests from a child to the parent, and downgrade requests from the parent to a child.
+      The third field <tt>state</tt> is the MSI state that the child wants to upgrade to for an upgrade request, or the MSI state that the child should be downgraded to for a downgrade request.</p>
+
+      <p>The interface of message FIFO is also defined in <tt>CacheTypes.bsv</tt>:</p>
+      <pre><code class="bsv">interface MessageFifo#(numeric type n);
+  method Action enq_resp(CacheMemResp d);
+  method Action enq_req(CacheMemReq d);
+  method Bool hasResp;
+  method Bool hasReq;
+  method Bool notEmpty;
+  method CacheMemMessage first;
+  method Action deq;
+endinterface</code></pre>
+
+      <p>The interface has two enqueue methods (<tt>enq_resp</tt> and <tt>enq_req</tt>), one for requests and the other for responses.
+      The boolean flags <tt>hasResp</tt> and <tt>hasReq</tt> indicate whether is any response or request in the FIFO respectively.
+      The <tt>notEmpty</tt> flag is simply the OR of <tt>hasResp</tt> and <tt>hasReq</tt>.
+      The interface only has one <tt>first</tt> and one <tt>deq</tt> method to retrieve one message at a time.</p>
+
+      <p>As mentioned in the class, a request should never block a response when they both sit in the same message FIFO.
+      To ensure this point, we could implement the message FIFO using two FIFOs as shown in Figure&nbsp;2.
+      At the enqueue port, requests are all enqueued into a request FIFO, while responses are all enqueued into another response FIFO.
+      At the dequeue port, response FIFO has priority over request FIFO, i.e. the <tt>deq</tt> method should dequeue the response FIFO as long as the response FIFO is not empty.
+      The numeric type <tt>n</tt> in the interface definition is the size of the response/request FIFO.</p>
+
+      <table class="figures">
+        <tr class="imgs">
+          <td><img src="proj2/msg_fifo.png" alt="Structure of a message FIFO"></td>
+        </tr>
+        <tr>
+          <td>Figure 2: Structure of a message FIFO</td>
+        </tr>
+      </table>
+
+      <div class="exercise"><p><strong>Exercise 1 (10 Points):</strong>
+      Implement the message FIFO (<tt>mkMessageFifo</tt> module) in <tt>src/includes/MessageFifo.bsv</tt>.
+      We provide a simple test in the <tt>unit_test/message-fifo-test</tt> folder.
+      Use <tt>make</tt> to compile, and use <tt>./simTb</tt> to run the test.</p>
+      </div>
+
+
+      <h3>Message router</h3>
+
+      <p>The message router connects all L1 D caches and the parent protocol processor.
+      We will implement this module in <tt>src/includes/MessageRouter.bsv</tt>.
+      It is declared as:</p>
+      <pre><code class="bsv">module mkMessageRouter(
+  Vector#(CoreNum, MessageGet) c2r, Vector#(CoreNum, MessagePut) r2c, 
+  MessageGet m2r, MessagePut r2m,
+  Empty ifc 
+);</code></pre>
+
+      <p>The <tt>MessageGet</tt> and <tt>MessagePut</tt> interfaces are just restricted views of the <tt>MessageFifo</tt> interface, and they are defined in <tt>CacheTypes.bsv</tt>:</p>
+      <pre><code class="bsv">interface MessageGet;
+  method Bool hasResp;
+  method Bool hasReq;
+  method Bool notEmpty;
+  method CacheMemMessage first;
+  method Action deq;
+endinterface
+interface MessagePut;
+  method Action enq_resp(CacheMemResp d);
+  method Action enq_req(CacheMemReq d);
+endinterface</code></pre>
+
+      <p>We have provided the <tt>toMessageGet</tt> and <tt>toMessagePut</tt> functions to convert a <tt>MessageFifo</tt> interface to <tt>MessageGet</tt> and <tt>MessagePut</tt> interfaces.
+      Below is an introduction to each module argument:</p>
+
+      <ul>
+	      <li><tt>c2r</tt> is the interface of the message FIFO from each L1 D cache.</li>
+	      <li><tt>r2c</tt> is the interface of the message FIFO to each L1 D cache.</li>
+	      <li><tt>m2r</tt> is the interface of the message FIFO from the parent protocol processor.</li>
+	      <li><tt>r2m</tt> is the interface of the message FIFO to the parent protocol processor.</li>
+      </ul>
+      <p>The major functionality of this module falls into two parts:</p>
+      <ol>
+	      <li>sending messages from the parent (<tt>m2r</tt>) to the correct L1 D cache (<tt>r2c</tt>), and</li>
+	      <li>sending messages from L1 D caches (<tt>c2r</tt>) to the parent (<tt>r2m</tt>).</li>
+      </ol>
+      <p>It should be noted that response messages have priority over request messages just like the case in message FIFO.</p>
+
+      <div class="exercise"><p><strong>Exercise 2 (10 Points):</strong>
+      Implement the <tt>mkMessageRouter</tt> module in <tt>src/includes/MessageRouter.bsv</tt>.
+      We provide a simple test in the <tt>unit_test/message-router-test</tt> folder.
+      Run the following to compile and run:
+      <pre class="cmdline">$ make
+$ ./simTb</pre>
+      </div>
+
+      <h3>L1 data cache</h3>
+      <p>The blocking L1 D cache (<em>without</em> store queue) will be implemented in <tt>src/includes/DCache.bsv</tt>:</p>
+      <pre><code class="bsv">module mkDCache#(CoreID id)(MessageGet fromMem, MessagePut toMem, RefDMem refDMem, DCache ifc);</code></pre>
+      <p>Below is the introduction to each module parameter and argument:</p>
+      <ul>
+	      <li><tt>id</tt> is the core ID, which will be attached to every message sent to the parent protocol processor.</li>
+	      <li><tt>fromMem</tt> is the interface of the message FIFO from parent protocol processor (or more accurately the message router), so downgrade requests and upgrade responses can be read out from this interface.</li>
+	      <li><tt>toMem</tt> is the interface of the message FIFO to parent protocol processor, so upgrade requests and downgrade responses should be sent to this interface.</li>
+	      <li><tt>refDMem</tt> is for debugging, and currently you do not need to worry about it.</li>
+      </ul>
+
+      <p>The <tt>DCache</tt> interface returned by the module is defined in <tt>CacheTypes.bsv</tt> as follow:</p>
+      <pre><code class="bsv">interface DCache;
+  method Action req(MemReq r);
+  method ActionValue#(MemResp) resp;
+endinterface</code></pre>
+
+      <p>You may have noticed that the <tt>MemOp</tt> type (defined in <tt>MemTypes.bsv</tt>), which is the type of the <tt>op</tt> field of <tt>MemReq</tt> structure (defined in <tt>MemTypes.bsv</tt>), now have five values: <tt>Ld, St, Lr, Sc</tt> and <tt>Fence</tt>.
+      For now you only need to handle <tt>Ld</tt> and <tt>St</tt> requests.
+      You could add logic in the <tt>req</tt> method of the <tt>DCache</tt> interface, which reports error if it detects requests other than <tt>Ld</tt> or <tt>St</tt>.</p>
+
+      <p>The <tt>MemReq</tt> type also has a new field <tt>rid</tt>, which is the ID of the request used for debugging.
+      <tt>rid</tt> is of type <tt>Bit\#(32)</tt>, and should be unique for each request from the same core.</p>
+
+      <p>We will implement a 16-entry direct-mapped L1 D cache (the number of cache lines is defined as type <tt>CacheRows</tt> in <tt>CacheTypes.bsv</tt>).
+      We suggest to use vector of registers to implement the cache arrays in order to assign initial values.
+      We have also provided some useful functions in <tt>CacheTypes.bsv</tt>.</p>
+
+      <p>The <tt>MSI</tt> state type is defined in <tt>CacheTypes.bsv</tt>:</p>
+      <pre><code class="bsv">typedef enum {M, S, I} MSI deriving(Bits, Eq, FShow);</code></pre>
+      <p>We have made <tt>MSI</tt> type become an instance of the <tt>Ord</tt> typeclass, so we can apply comparison operator (<tt>&gt;, &lt;, &gt;=, &lt;=</tt>, etc.) on it.
+      The order is <tt>M &gt; S &gt; I</tt>.</p>
+
+      <div class="exercise">
+      <p><strong>Exercise 3 (10 Points):</strong>
+      Implement the <tt>mkDCache</tt> module in <tt>src/includes/DCache.bsv</tt>.
+      This should be a blocking cache <em>without</em> store queue.
+    <!--  You may want to use the work-around in Exercise 1 in the first part of the final project to avoid future scheduling conflicts when the D cache is integrated to the processor pipeline. -->
+      We provide a simple test in the <tt>unit_test/cache-test</tt> folder.
+      To compile and test, run</p>
+      <pre class="cmdline">$ make
+$ ./simTb</pre>
+      </div>
+
+
+      <h3>Parent protocol processor</h3>
+
+      <p>The parent protocol processor will be implemented in <tt>src/includes/PPP.bsv</tt>:</p>
+      <pre><code class="bsv">module mkPPP(MessageGet c2m, MessagePut m2c, WideMem mem, Empty ifc);</code></pre>
+      <p>Below is the introduction to each module argument:</p>
+      <ul>
+	      <li><tt>c2m</tt> is the interface of the message FIFO from L1 D caches (actually from the message router), and upgrade requests and downgrade responses can be read out from this interface.</li>
+	      <li><tt>m2c</tt> is the interface of the message FIFO to L1 D caches (atually to the message router), and downgrade requests and upgrade responses should be sent to this interface.</li>
+	      <li><tt>mem</tt> is the interface of the main memory, which we have already used in lab 7.</li>
+      </ul>
+
+      <p>In the lecture, the directory in the parent protocol processor record the MSI states for every possible address.
+      However this will take a significant amount of storage for a 32-bit address space.
+      To reduce the amount of storage needed for the directory, we notice that we only need to track addresses that exist in L1 D caches.
+      Specifically, we could implement the directory as follow:</p>
+      <pre><code class="bsv">Vector#(CoreNum, Vector#(CacheRows, Reg#(MSI))) childState &lt;- replicateM(replicateM(mkReg(I)));
+Vector#(CoreNum, Vector#(CacheRows, Reg#(CacheTag))) childTag &lt;- replicateM(replicateM(mkRegU));</code></pre>
+
+      <p>When the parent protocol processor wants to know the approximate MSI state of address <tt>a</tt> on core <tt>i</tt>, it can first read out <tt>tag=childTag[i][getIndex(a)]</tt>.
+      If <tt>tag</tt> does not match <tt>getTag(a)</tt>, then the MSI state must be <tt>I</tt>.
+      Otherwise the state should be <tt>childState[i][getIndex(a)]</tt>.
+      In this way, we dramatically reduce the storage needed by the directory, but we need to maintain the <tt>childTag</tt> array when there is any change on the children states.</p>
+
+      <p>Another difference from the lecture is that the main memory data should be accessed using the <tt>mem</tt> interface, while the lecture just assumes a combinational read of data.</p>
+
+      <div class="exercise"><p><strong>Exercise 4 (10 Points):</strong>
+      Implement the <tt>mkPPP</tt> module in <tt>src/includes/PPP.bsv</tt>.
+      We provide a simple test in the <tt>unit_test/ppp-test</tt> folder.
+      Use <tt>make</tt> to compile, and use <tt>./simTb</tt> to run the test.</p>
+      </div>
+
+      <h1>This is the end of the first part of the project. On monday 27, I will release the testing of the entire memory hierarchy and the integration.<h1>
+      <!-- 
+      
+      <h2>Testing the entire memory hierarchy</h2>
+
+      <p>Since we have constructed each piece of the memory system, we now put them together and test the whole memory hierarchy using the testbench in <tt>uint_test/sc-test</tt> folder.
+      The test will make use of the "<tt>RefDMem refDMem</tt>" argument of <tt>mkDCache</tt>, and we need to add a few calls to methods of <tt>refDMem</tt> in <tt>mkDCache</tt>.
+      <tt>refDMem</tt> is returned by a reference model for coherent memory (<tt>mkRefSCMem</tt> in <tt>src/ref/RefSCMem.bsv</tt>), and this model can detect violation of coherence based on the calls of methods of <tt>refDMem</tt>.
+      <tt>RefDMem</tt> is defined in <tt>src/ref/RefTypes.bsv</tt> as follow:</p>
+      <pre><code class="bsv">interface RefDMem;
+  method Action issue(MemReq req);
+  method Action commit(MemReq req, Maybe#(CacheLine) line, Maybe#(MemResp) resp);
+endinterface</code></pre>
+
+      <p>The <tt>issue</tt> method should be called for each request in the <tt>req</tt> method of <tt>mkDCache</tt>:</p>
+      <pre><code class="bsv">method Action req(MemReq r);
+  refDMem.issue(r);
+  // then process r
+endmethod</code></pre>
+
+      <p>This will tell the reference model the program order of all requests sent to the D cache.</p>
+
+      <p>The <tt>commit</tt> method should be called when a request finishes processing, i.e. when a <tt>Ld</tt> request gets load result, or a <tt>St</tt> request writes to data array in the cache.
+      Below is the introduction to each method argument of <tt>commit</tt>:</p>
+      <ul>
+	      <li><tt>req</tt> is the request that is committing (i.e. finishing processing).</li>
+	
+	      <li><tt>line</tt> is the original value of the cache line that <tt>req</tt> is accessing.
+        The cache line here refers to the 64B data block with line address <tt>getLineAddr(req.addr)</tt>.
+        Therefore it does not necessarily refer to the line in the D cache, because D cache may just contain garbage data.
+        Since <tt>line</tt> is the original value, in case of committing a store request, it should be the value before being modified by the store.<br><br>
+	
+        If we know the cache line data, <tt>line</tt> should be set to <tt>tagged Valid</tt>.
+        Otherwise, we set <tt>line</tt> to be <tt>tagged Invalid</tt>.
+        In case of <tt>mkDCache</tt>, we always know the cache line data when a request commits, because it is either already in D cache or in the upgrade response from parent. 
+        Therefore <tt>line</tt> should always be set to <tt>tagged Valid</tt>.</li>
+	
+	      <li><tt>resp</tt> is the response sent back to the core for <tt>req</tt>.
+        If there is a response sent back to the core, then <tt>resp</tt> should be <tt>tagged Valid response</tt>; otherwise it should be <tt>tagged Invalid</tt>. 
+        For a <tt>Ld</tt> request, <tt>resp</tt> should be <tt>tagged Valid (load result)</tt>.
+        For a <tt>St</tt> request, <tt>resp</tt> should be <tt>tagged Invalid</tt> because D cache never send responses for <tt>St</tt> requests.</li>
+      </ul>
+
+      <p>When the <tt>commit(req, line, resp)</tt> method is called by <tt>mkDCache</tt>, the reference model for coherent memory will check the following things:</p>
+      <ol>
+	      <li>Whether <tt>req</tt> can be committed.
+	<tt>req</tt> cannot be committed if it has not been issued yet (i.e. the <tt>issue</tt> method has never been called for <tt>req</tt>), or some older request from the same core has not been committed (i.e. illegal reordering of memory requests).</li>
+	
+	      <li>Whether the cache line value <tt>line</tt> is correct.
+	The check will not be performed is <tt>line</tt> is <tt>Invalid</tt>.</li>
+	
+	      <li>Whether the response <tt>resp</tt> is correct.</li>
+      </ol>
+
+      <p>The testbench in <tt>uint_test/sc-test</tt> folder instantiates a whole memory system, and feeds random requests to each L1 D cache.
+      It relies on the reference model to detect violation of coherence inside the memory system.</p>
+
+      <div class="exercise"><p><strong>Exercise 5 (10 Points):</strong>
+      Add calls to the methods of <tt>refDMem</tt> in <tt>mkDCache</tt> module in <tt>src/includes/DCache.bsv</tt>.
+      Then go to <tt>uint_test/sc-test</tt> folder, and use <tt>make</tt> to compile the testbench.
+      This will create two simulation binaries: <tt>simTb_2</tt> for two D caches, and <tt>simTb_4</tt> for four D caches.
+      You can also compile them separately by <tt>make tb_2</tt> and <tt>make tb_4</tt>.</p>
+
+      <p>Run the test by running</p>
+      <pre class="cmdline">$ ./simTb_2 &gt; dram_2.txt</pre>
+      <p>and</p>
+      <pre class="cmdline">$ ./simTb_4 &gt; dram_4.txt</pre>
+      <p><tt>dram_*.txt</tt> will contain the debugging output of <tt>mkWideMemFromDDR3</tt> module, i.e. requests and responses with the main memory.
+      The main memory is initialized by <tt>mem.vmh</tt>, which is an empty VMH file.
+      This will initialize every byte of the main memory to be <tt>0xAA</tt>.</p>
+      </div>
+
+      <p>The trace of the requests sent to D cache <tt>i</tt> can be found in <tt>driver_&lt;i&gt;_trace.out</tt>.</p>
+
+      <h2>Test programs</h2>
+      <p>We can compile the test programs using the following commands:</p>
+<pre class="cmdline">$ cd programs/assembly
+$ make
+$ cd ../benchmarks
+$ make
+$ cd ../mc_bench
+$ make
+</pre>
+
+      <p><tt>programs/assembly</tt> and <tt>programs/benchmarks</tt> contains single-core assembly and benchmark programs.
+      In these programs only core 0 will execute the programs, while core 1 will enter a <tt>while(1)</tt> loop soon after startup.</p>
+
+      <p><tt>programs/mc_bench</tt> contains multicore benchmark programs.
+      In the main function of these programs, the first thing is to get the core ID (i.e. the <tt>mhartid</tt> CSR), and then jump to different functions based on the core ID.
+      Some programs are written only using plain loads and stores, while others utilize atomic instructions (load-reserve and store-conditional).</p>
+
+      <p>We have provided multiple scripts to run the test programs, like usual. </p>
+
+      <h2>Integrating processors into the memory hierarchy</h2>
+
+      <p>After testing the memory system, we start to integrate it into the multicore system.
+      We have provided the code for the multicore system in <tt>src/Proc.bsv</tt>, which instantiates reference model for coherent memory, main memory, cores, message router, and parent protocol processor.
+      We have gone over every thing in <tt>Proc.bsv</tt> except the cores (<tt>mkCore</tt> module).
+      We will use two types of cores: a three-cycle core and a six-stage pipelined core.
+      The macro <tt>CORE_FILE</tt> in <tt>Proc.bsv</tt> controls which type of the core we are using.</p>
+
+      <p>Notice that there are two types of reference models, <tt>mkRefSCMem</tt> and <tt>mkRefTSOMem</tt>.
+      <tt>mkRefSCMem</tt> is the reference model for memory systems with blocking caches that do not contain any store queue, while <tt>mkRefTSOMem</tt> is for memory systems with caches that contain store queues.
+      Currently we will be using <tt>mkRefSCMem</tt> since we have not introduced store queue to our caches.
+      If you decide to go further down the path of non blocking cache with Load Store Queue, you will have to switch this reference model for the TSO one.</p>
+
+      <h3>Three-cycle core</h3>
+      <p>We have provided the implementation of the three-cycle core in <tt>src/ThreeCycle.bsv</tt>:</p>
+      <pre><code class="bsv">module mkCore#(CoreID id)(WideMem iMem, RefDMem refDMem, Core ifc);</code></pre>
+      <p>The <tt>iMem</tt> argument is passed to the I Cache (same as the I Cache in the lab 7). 
+      The <tt>refDMem</tt> argument is passed the D cache so that we can debug with the help of reference model.
+      The <tt>Core</tt> interface is defined in <tt>src/includes/ProcTypes.bsv</tt>.</p>
+
+      <p>There is one thing worth noticing in this code: we instantiate a <tt>mkMemReqIDGen</tt> module to generate the <tt>rid</tt> field for each request sent to the D cache.
+      It is crucial that every D cache request issued by the same core has a <tt>rid</tt>, because the reference model for coherent memory relies on <tt>rid</tt> field to identify requests.
+      The <tt>mkMemReqIDGen</tt> module is implemented in <tt>MemReqIDGen.bsv</tt>, and this module is simply a 32-bit counter.</p>
+
+      <p>Although the code issues requests other than <tt>Ld</tt> or <tt>St</tt> to the D cache, the programs we will run in the following Exercise will only use normal loads and stores.</p>
+
+      <div class="exercise"><p><strong>Exercise 6 (10 Points):</strong>
+      Copy <tt>ICache.bsv</tt> from an old lab (7 probably?) to <tt>src/includes/ICache.bsv</tt>.
+      Instantiate three-cycle cores in your Proc.bsv.
+      Compile the multicore system using three-cycle cores by <tt>make build.bluesim CORENUM=2</tt>.
+      Test the processor using scripts <tt>run_asm.sh</tt>, <tt>run_bmarks.sh</tt> and <tt>run_mc_no_atomic.sh</tt>.
+      The script <tt>run_mc_no_atomic.sh</tt> runs multicore programs that only use plain loads and stores.</p>
+      </div>
+
+      <h3>Six-stage pipelined core</h3>
+      <div class="exercise"><p><strong>Exercise 7 (10 Points):</strong>
+      Implement a super cool six-stage pipelined core in <tt>src/SixStage.bsv</tt>.
+      The code should be very similar to what you have implemented in previous labs.
+      You also need to copy a <tt>Bht.bsv</tt> in <tt>src/includes/Bht.bsv</tt>.
+      You may also want to consult <tt>ThreeCycle.bsv</tt> for some details (e.g. generating request ID).</p>
+      </div>
+
+      <p>Instead of a ThreeCycle, instantiate SixStage cores in your Proc.bsv, compile the multicore system <tt>make build.bluesim</tt>.
+      Test the processor using scripts <tt>run_asm.sh</tt>, <tt>run_bmarks.sh</tt> and <tt>run_mc_no_atomic.sh</tt>.</p>
+
+      <h2>Atomic memory access instructions</h2>
+      <p>In real life, multicore programs use atomic memory access instructions to implement synchronization more efficiently.
+      Now we will implement the load-reserve (<tt>lr.w</tt>) and store-conditional (<tt>sc.w</tt>) instructions in RISC-V.
+      Both instructions access a word in the memory (like <tt>lw</tt> and <tt>sw</tt>), but they carry special side effects.</p>
+
+      <p>We have already implemented everything needed for both instructions outside the memory system (see <tt>ThreeCycle.bsv</tt>).
+      The <tt>iType</tt> of <tt>lr.w</tt> is <tt>Lr</tt>, and the <tt>op</tt> field of the corresponding D cache request is also <tt>Lr</tt>.
+      At writeback stage, <tt>lr.w</tt> will write the load result to the destination register.
+      The <tt>iType</tt> of <tt>sc.w</tt> is <tt>Sc</tt>, and the <tt>op</tt> field of the corresponding D cache request is also <tt>Sc</tt>.
+      At writeback stage, <tt>sc.w</tt> will write a value returned from D cache, which indicates whether this store-conditional succeeds or not, to the destination register.</p>
+
+      <p>The only remaining thing for supporting both instructions is to change our D cache.
+      Notice that the parent protocol processor does not need any change.</p>
+
+      <p>Here we do the simplest implementation where we keep track of only one reservation per thread.
+         So we need to add a new state element to <tt>mkDCache</tt>:</p>
+      <pre><code class="bsv">Reg#(Maybe#(CacheLineAddr)) linkAddr &lt;- mkReg(Invalid);</code></pre>
+      <p>This register records the cache line address reserved by <tt>lr.w</tt> (if the register is valid).
+      Below is the summary on the behavior of <tt>Lr</tt> and <tt>Sc</tt> requests in the D cache:</p>
+      <ul>
+	      <li>A <tt>Lr</tt> can be processed in the D cache just like a normal <tt>Ld</tt> request.
+        When this request finishes processing, it sets <tt>linkAddr</tt> to be <tt>tagged Valid (cache line address accessed)</tt>.</li>
+	
+	      <li>When a <tt>Sc</tt> request is processed, we first check whether the reserved address in <tt>linkAddr</tt> matches the address accessed by the <tt>Sc</tt> request.
+        If <tt>linkAddr</tt> is not valid or addresses do not match, we directly respond the core with value <strong>1</strong> indicating a failed store-conditional operation.
+        Otherwise we continue to process it as a <tt>St</tt> request.
+        If it hits in the cache (i.e. cache line is in <tt>M</tt> state), we write the data array, and respond the core with value <strong>0</strong> indicating a successful store-conditional operation.
+        In case of a store miss, when we get the upgrade response from the parent, we need to check against <tt>linkAddr</tt> once again.
+        If matching, we perform and write and returns 0 to the core; otherwise we just return 1 to the core.<br><br>
+	
+        We have provided constants <tt>scFail</tt> and <tt>scSucc</tt> in <tt>ProcTypes.bsv</tt> to denote the return values for <tt>Sc</tt> requests.<br><br>
+        
+        When a <tt>Sc</tt> request finishes processing, it always sets <tt>linkAddr</tt> to <tt>tagged Invalid</tt>, no matter it succeeds or fails.</li>
+      </ul>
+
+      <p>One more thing about <tt>linkAddr</tt> is that it must be set to <tt>tagged Invalid</tt> when the corresponding cache line leaves the D cache.
+      Namely, when a cache line is evicted from the D cache (e.g. due to replacement or invalidation request), the cache line address must be checked against <tt>linkAddr</tt>.
+      If matching, <tt>linkAddr</tt> should be set to <tt>tagged Invalid</tt>.</p>
+
+      <div class="exercise"><strong>Exercise 8 (20 Points):</strong>
+      Changes <tt>src/includes/DCache.bsv</tt> and <tt>src/SixStage.bsv</tt> to handle <tt>lr.w</tt> and <tt>sc.w</tt> instructions.
+      Note that appropriate calls of methods of the <tt>refDMem</tt> interface in <tt>mkDCache</tt> are also needed for <tt>Lr</tt> and <tt>Sc</tt> requests.
+      For the <tt>commit</tt> method of interface <tt>refDMem</tt>, the last argument <tt>resp</tt> should be <tt>tagged Valid (response to core)</tt> for both <tt>Lr</tt> and  <tt>Sc</tt> requests.
+      The second argument <tt>line</tt> of the <tt>commit</tt> method may be set to <tt>tagged Invalid</tt> in some occasions, because we do not always know the cache line value when a request commits.</p>
+
+      <p>Go to <tt>scemi/sim</tt> folder, and build the three-cycle and six-stage processors using</p>
+      <pre class="cmdline">$ build -v threecache</pre> <p>and</p> <pre class="cmdline">build -v sixcache</pre>
+      Test the processor using scripts <tt>run_asm.sh</tt>, <tt>run_bmarks.sh</tt> and <tt>run_mc_all.sh</tt>.
+      The script <tt>run_mc_all.sh</tt> will run all multicore programs, and some of them use <tt>lr.w</tt> and <tt>sc.w</tt>.</p>
+      </div>
+
+      -->
+      <h2>Final Presentation</h2>
+
+      <p>On December 13th from 3 PM to 5 PM, we will have final presentations for this project and some pizza at the end.
+      We would like you to prepare a presentation no more than 10 minutes about your final project.
+      You should talk about the following things:</p>
+      <ol>
+	      <li>How the work is divided among the group members.</li>
+	      <li>What difficulties or bugs you have encountered, and how you solved them.</li>
+	      <li>The new things you have added (or you are still adding).</li>
+      </ol>
+
+    </div>
+
+        <div class="container">
+      <hr>
+      <footer class="footer">
+        <div class="container">
+          <p class="footer">&copy; 2016 <a href="http://web.mit.edu">Massachusetts Institute of Technology</a>. All rights reserved.</p>
+        </div>
+      </footer>
+    </div>
+
+    <script src="../js/jquery-3.1.0.min.js"></script>
+    <script src="../js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+/* many thanks to http://stackoverflow.com/questions/7717527/smooth-scrolling-when-clicking-an-anchor-link */
+$(document).on('click', 'a', function(event){
+    var href = $.attr(this, 'href');
+    var hash = href.indexOf("#");
+    var doc = location.pathname.substring(location.pathname.lastIndexOf("/") + 1);
+    console.log(doc);
+    if (hash !== -1 && href.substring(0, hash) === doc) {
+      event.preventDefault();
+      $('html, body').animate({
+          scrollTop: $( href.substring(hash) ).offset().top
+      }, 500);
+    }
+});
+    </script>
+
+
+  </body>
+</html>
