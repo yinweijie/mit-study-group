@@ -1,16 +1,32 @@
 import Multiplexer::*;
 
+// ref. 【金山文档 | WPS云文档】 lec17-Combinational Logic Blocks
+// https://www.kdocs.cn/l/cg8OdpLufYZh
+
+// Full-adder sum bit: s_i = XOR(a_i, b_i, c_i)
 function Bit#(1) fa_sum(Bit#(1) a, Bit#(1) b, Bit#(1) c);
     return a ^ b ^ c;
 endfunction
 
+// Full-adder carry-out: c_{i+1} = MAJ(a_i, b_i, c_i) = a_i b_i + a_i c_i + b_i c_i
 function Bit#(1) fa_carry(Bit#(1) a, Bit#(1) b, Bit#(1) c);
     return (a & b) | (a & c) | (b & c);
 endfunction
 
+// 【金山文档 | WPS云文档】 L02-CombinationalCkts
+// https://www.kdocs.cn/l/cpankMGYOd5Q
 function Bit#(5) add4(Bit#(4) a, Bit#(4) b, Bit#(1) c0);
     // TODO: Exercise 4
-    return ?;
+    Bit#(4) s;
+    Bit#(5) c = 0;
+    c[0] = c0;
+
+    for (Integer i = 0; i < 4; i = i + 1) begin
+        s[i] = fa_sum(a[i], b[i], c[i]);
+        c[i+1] = fa_carry(a[i], b[i], c[i]);
+    end
+    
+    return {c[4], s};
 endfunction
 
 interface Adder8;
