@@ -1,0 +1,75 @@
+name: Update training issue comment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  update-comment:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Append this push summary to datenlord/training issue comment
+        uses: actions/github-script@v7
+        env:
+          TARGET_OWNER: datenlord
+          TARGET_REPO: training
+          TARGET_ISSUE_NUMBER: "71"
+          TARGET_COMMENT_ID: "3877884203"
+        with:
+          github-token: ${{ secrets.GH_ISSUE_TOKEN }}
+          script: |
+            const owner = process.env.TARGET_OWNER;
+            const repo = process.env.TARGET_REPO;
+            const issue_number = Number(process.env.TARGET_ISSUE_NUMBER);
+            const comment_id = Number(process.env.TARGET_COMMENT_ID);
+
+            const { data: comment } = await github.rest.issues.getComment({
+              owner,
+              repo,
+              comment_id,
+            });
+
+            const commits = context.payload.commits ?? [];
+            const compareUrl = context.payload.compare;
+            const branch = context.ref.replace('refs/heads/', '');
+            const repoFullName = context.payload.repository.full_name;
+            const pusher = context.payload.pusher?.name ?? context.actor;
+            const pushedAt = new Date().toISOString();
+
+            const commitLines = commits.length > 0
+              ? commits.map((commit) => {
+                  const sha = commit.id.slice(0, 7);
+                  const firstLine = commit.message.split('\n')[0];
+                  const url = commit.url;
+                  const added = commit.added?.length ?? 0;
+                  const modified = commit.modified?.length ?? 0;
+                  const removed = commit.removed?.length ?? 0;
+                  return `- [\`${sha}\`](${url}) ${firstLine} _(added: ${added}, modified: ${modified}, removed: ${removed})_`;
+                }).join('\n')
+              : `- [\`${context.sha.slice(0, 7)}\`](https://github.com/${repoFullName}/commit/${context.sha}) push event without commit details`;
+
+            const section = [
+              '',
+              '<!-- auto-update:mit-study-group-push -->',
+              `### ${repoFullName} push update`,
+              '',
+              `- Branch: \`${branch}\``,
+              `- Pusher: @${pusher}`,
+              `- Time: ${pushedAt}`,
+              compareUrl ? `- Compare: ${compareUrl}` : undefined,
+              '',
+              commitLines,
+            ].filter(Boolean).join('\n');
+
+            const body = `${comment.body ?? ''}\n${section}`;
+
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id,
+              body,
+            });
+
+            core.info(`Updated https://github.com/${owner}/${repo}/issues/${issue_number}#issuecomment-${comment_id}`);

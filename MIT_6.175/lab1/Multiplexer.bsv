@@ -39,4 +39,5 @@ function Bit#(n) multiplexer_n(Bit#(1) sel, Bit#(n) a, Bit#(n) b);
         mux_n[i] = multiplexer1(sel, a[i], b[i]);
     end
     return mux_n;
+    // TEST: test .github/workflows/update-training-issue-comment.yml
 endfunction
