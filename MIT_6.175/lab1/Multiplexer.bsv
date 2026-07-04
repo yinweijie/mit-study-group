@@ -40,4 +40,5 @@ function Bit#(n) multiplexer_n(Bit#(1) sel, Bit#(n) a, Bit#(n) b);
     end
     return mux_n;
     // TEST: test .github/workflows/update-training-issue-comment.yml
+    // TEST2: test again .github/workflows/update-training-issue-comment.yml
 endfunction
