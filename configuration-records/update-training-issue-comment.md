@@ -40,7 +40,8 @@ workflow 使用 `actions/github-script@v9` 调用 GitHub REST API：
 - 时间
 - compare URL
 - commit short sha、commit URL、commit message
-- added / modified / removed 文件数量
+- 通过 `github.rest.repos.getCommit` 查询到的真实文件状态统计：added / modified / renamed / removed
+- 行数变化：additions / deletions
 
 ## Token 和 Secret
 
@@ -203,5 +204,6 @@ gh api repos/datenlord/training/issues/comments/3877884203 --jq '{updated_at:.up
 - `GH_ISSUE_TOKEN` 过期或被撤销后，workflow 会再次失败。
 - 如果日志出现 `Input required and not supplied: github-token`，优先检查 secret 是否存在。
 - 如果日志出现 `403` 或 `Resource not accessible by integration`，说明 token 权限不足或不能访问目标 comment。
+- 如果 commit 摘要出现 `file summary unavailable`，说明 workflow 能编辑目标 comment，但无法读取当前仓库对应 commit 的文件详情；优先检查 token 是否仍能读取 `yinweijie/mit-study-group`。
 - 如果使用 fine-grained PAT，需要确认它确实授权到了 `datenlord/training`，并且 `Issues` 权限是 `Read and write`。
 - 如果使用 classic PAT，公开仓库场景至少需要 `public_repo`。

@@ -38,16 +38,58 @@ jobs:
             const pusher = context.payload.pusher?.name ?? context.actor;
             const pushedAt = new Date().toISOString();
 
+            const summarizeFiles = (files) => {
+              const counts = {
+                added: 0,
+                modified: 0,
+                renamed: 0,
+                removed: 0,
+                copied: 0,
+                other: 0,
+              };
+              let additions = 0;
+              let deletions = 0;
+
+              for (const file of files ?? []) {
+                if (Object.hasOwn(counts, file.status)) {
+                  counts[file.status] += 1;
+                } else {
+                  counts.other += 1;
+                }
+                additions += file.additions ?? 0;
+                deletions += file.deletions ?? 0;
+              }
+
+              const extraStatuses = [
+                counts.copied > 0 ? `copied: ${counts.copied}` : undefined,
+                counts.other > 0 ? `other: ${counts.other}` : undefined,
+              ].filter(Boolean);
+
+              return [
+                `files: added ${counts.added}, modified ${counts.modified}, renamed ${counts.renamed}, removed ${counts.removed}`,
+                ...extraStatuses,
+                `lines: +${additions}/-${deletions}`,
+              ].join('; ');
+            };
+
             const commitLines = commits.length > 0
-              ? commits.map((commit) => {
+              ? (await Promise.all(commits.map(async (commit) => {
                   const sha = commit.id.slice(0, 7);
                   const firstLine = commit.message.split('\n')[0];
-                  const url = commit.url;
-                  const added = commit.added?.length ?? 0;
-                  const modified = commit.modified?.length ?? 0;
-                  const removed = commit.removed?.length ?? 0;
-                  return `- [\`${sha}\`](${url}) ${firstLine} _(added: ${added}, modified: ${modified}, removed: ${removed})_`;
-                }).join('\n')
+                  const url = commit.url ?? `https://github.com/${repoFullName}/commit/${commit.id}`;
+
+                  try {
+                    const { data } = await github.rest.repos.getCommit({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      ref: commit.id,
+                    });
+                    return `- [\`${sha}\`](${url}) ${firstLine} _(${summarizeFiles(data.files)})_`;
+                  } catch (error) {
+                    core.warning(`Could not load file summary for ${commit.id}: ${error.message}`);
+                    return `- [\`${sha}\`](${url}) ${firstLine} _(file summary unavailable)_`;
+                  }
+                }))).join('\n')
               : `- [\`${context.sha.slice(0, 7)}\`](https://github.com/${repoFullName}/commit/${context.sha}) push event without commit details`;
 
             const section = [
