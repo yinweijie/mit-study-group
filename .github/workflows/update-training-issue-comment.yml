@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Append this push summary to datenlord/training issue comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           TARGET_OWNER: datenlord
           TARGET_REPO: training
