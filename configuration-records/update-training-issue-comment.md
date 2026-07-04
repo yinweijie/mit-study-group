@@ -75,9 +75,18 @@ github-token: ${{ secrets.GH_ISSUE_TOKEN }}
 Cannot find the specified resource owner: 'datenlord'
 ```
 
-因此没有继续使用 fine-grained token。实际写入 `GH_ISSUE_TOKEN` 的 token 来自本机已登录的 `gh` CLI 凭据，账号为 `yinweijie`，权限包含 `repo` 和 `workflow`，能够编辑该公开 issue comment。token 明文没有写入代码、文档或提交历史。
+因此没有继续使用 fine-grained token。初始配置阶段曾临时使用本机已登录的 `gh` CLI 凭据写入 `GH_ISSUE_TOKEN`，用于验证 workflow 是否可行。
 
-后续如果要收敛权限，可以重新生成一个专用 classic PAT，只授予 `public_repo`，然后覆盖更新 `GH_ISSUE_TOKEN`。
+后续已将 `GH_ISSUE_TOKEN` 覆盖为专用 classic PAT：
+
+```text
+Secret updated: 2026-07-04T10:40:06Z
+Token type: classic personal access token
+Scope: public_repo
+Purpose: update datenlord/training issue 71 comment 3877884203
+```
+
+token 明文没有写入代码、文档或提交历史。后续维护时，如果该 token 被撤销、过期或长期未使用失效，应重新生成同权限的 classic PAT 并覆盖更新 `GH_ISSUE_TOKEN`。
 
 ## Secret 设置命令
 
