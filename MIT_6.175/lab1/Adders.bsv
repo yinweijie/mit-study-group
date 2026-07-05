@@ -44,6 +44,11 @@ endmodule
 module mkCSAdder(Adder8);
     method ActionValue#(Bit#(9)) sum(Bit#(8) a, Bit#(8) b, Bit#(1) c_in);
         // TODO: Exercise 5
-        return ?;
+        let high1 = add4(a[7:4], b[7:4], 1'b1);
+        let high0 = add4(a[7:4], b[7:4], 1'b0);
+        let low = add4(a[3:0], b[3:0], c_in);
+        Bit#(1) c_out = multiplexer1(low[4], high0[4], high1[4]);
+        Bit#(4) s_high = multiplexer_n(low[4], high0[3:0], high1[3:0]);
+        return {c_out, s_high, low[3:0]};
     endmethod
 endmodule
